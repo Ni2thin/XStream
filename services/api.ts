@@ -1,7 +1,7 @@
 import { VideoMetadata } from '../types';
 import { fetchTweetMetadata as fetchMockMetadata } from './mockApi';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() || 'http://localhost:8000';
 
 export const fetchTweetMetadata = async (url: string): Promise<VideoMetadata> => {
   // 1. Attempt to call the real Python backend

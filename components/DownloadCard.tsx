@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { VideoMetadata, DownloadOption } from '../types';
-import { Download, Video, Music, Play, X } from 'lucide-react';
+import { Video, Music, Play, X } from 'lucide-react';
 
 interface DownloadCardProps {
   data: VideoMetadata;
@@ -12,8 +12,27 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({ data, onReset }) => 
   const [isPreviewing, setIsPreviewing] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
+  const hasOptions = Array.isArray(data.options) && data.options.length > 0;
+  if (!hasOptions) {
+    return (
+      <div className="w-full max-w-xl bg-white rounded-3xl shadow-md border border-slate-200 p-8 text-center">
+        <p className="text-lg font-semibold text-slate-900 mb-2">No download links available</p>
+        <p className="text-sm text-slate-500">
+          We couldn’t find any downloadable media for this tweet. It might be private, deleted, or hosted elsewhere.
+        </p>
+        <button
+          onClick={onReset}
+          className="mt-6 inline-flex items-center justify-center px-5 py-2.5 rounded-full bg-slate-900 text-white font-medium hover:bg-slate-800 transition-colors"
+        >
+          Try another link
+        </button>
+      </div>
+    );
+  }
+
   // Get the first video URL for preview (highest quality, skip MP3 options)
-  const previewUrl = data.options?.find(opt => !opt.url.startsWith('mp3:'))?.url || (data as any).previewUrl || '';
+  const previewOption = data.options.find(opt => !opt.url.startsWith('mp3:'));
+  const previewUrl = previewOption?.url || (data as any).previewUrl || '';
   const thumbnailUrl = (data as any).thumbnailUrl || '';
   const duration = (data as any).duration || '';
   const author = (data as any).author || 'Twitter User';
@@ -34,7 +53,9 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({ data, onReset }) => 
       const fileName = `${data.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${option.quality}.${fileExtension}`;
       
       // Use backend proxy to handle CORS and ensure direct download
-      const proxyUrl = `http://localhost:8000/api/download?url=${encodeURIComponent(option.url)}`;
+      const apiBase =
+        import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8000';
+      const proxyUrl = `${apiBase}/api/download?url=${encodeURIComponent(option.url)}`;
       
       const response = await fetch(proxyUrl, {
         method: 'GET',

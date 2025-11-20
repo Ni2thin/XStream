@@ -10,11 +10,28 @@ View your app in AI Studio: https://ai.studio/apps/drive/1_tftd9ekPDgwNfycI_w_kS
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+**Prerequisites:**  Node.js, Python 3.10+
 
 
-1. Install dependencies:
+1. Install dependencies  
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+2. Create `.env.local` in the project root and set:
+   ```bash
+   VITE_API_BASE_URL=http://localhost:8000
+   ```
+   Point this to your deployed backend URL in production (e.g. Vercel/Render).
+3. Start the FastAPI backend
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   uvicorn main:app --reload --port 8000
+   ```
+4. Run the Vite dev server  
    `npm run dev`
+
+## Deploying
+
+1. Push the repo to GitHub (already at https://github.com/Ni2thin/XStream.git).
+2. On Vercel, create a project from that repo.
+3. Add an Environment Variable `VITE_API_BASE_URL` with your public backend URL.
+4. Ensure your backend’s CORS list includes `https://xstream-five.vercel.app` (already configured in `backend/main.py`).
