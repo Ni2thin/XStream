@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { VideoMetadata, DownloadOption } from '../types';
 import { Video, Music, Play, X } from 'lucide-react';
+import { getApiBaseUrl } from '../config';
 
 interface DownloadCardProps {
   data: VideoMetadata;
@@ -53,8 +54,7 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({ data, onReset }) => 
       const fileName = `${data.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${option.quality}.${fileExtension}`;
       
       // Use backend proxy to handle CORS and ensure direct download
-      const apiBase =
-        import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') || 'http://localhost:8000';
+      const apiBase = getApiBaseUrl();
       const proxyUrl = `${apiBase}/api/download?url=${encodeURIComponent(option.url)}`;
       
       const response = await fetch(proxyUrl, {

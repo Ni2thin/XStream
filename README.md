@@ -15,7 +15,7 @@ View your app in AI Studio: https://ai.studio/apps/drive/1_tftd9ekPDgwNfycI_w_kS
 
 1. Install dependencies  
    `npm install`
-2. Create `.env.local` in the project root and set:
+2. (Recommended) Create `.env.local` in the project root and set:
    ```bash
    VITE_API_BASE_URL=http://localhost:8000
    ```
@@ -33,5 +33,5 @@ View your app in AI Studio: https://ai.studio/apps/drive/1_tftd9ekPDgwNfycI_w_kS
 
 1. Push the repo to GitHub (already at https://github.com/Ni2thin/XStream.git).
 2. On Vercel, create a project from that repo.
-3. Add an Environment Variable `VITE_API_BASE_URL` with your public backend URL.
-4. Ensure your backend’s CORS list includes `https://xstream-five.vercel.app` (already configured in `backend/main.py`).
+3. Add an Environment Variable `VITE_API_BASE_URL` with your public backend URL. If you skip this, the frontend will assume the API is available under the same origin at `/api/...`, so configure a reverse proxy/rewrites accordingly.
+4. Ensure your backend’s CORS list includes your Vercel domain (see `backend/main.py`).
