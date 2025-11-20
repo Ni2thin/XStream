@@ -45,6 +45,7 @@ origins = [
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
     "https://xstream-five.vercel.app",  # Production frontend
+    "https://xstream-v1.vercel.app",  # New production domain
 ]
 
 app.add_middleware(
