@@ -12,7 +12,6 @@ import {
   MousePointerClick,
   Download,
   HelpCircle,
-  Globe,
   Menu,
   X as XIcon
 } from 'lucide-react';
@@ -44,7 +43,6 @@ function App() {
   const [videoData, setVideoData] = useState<VideoMetadata | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showLogoAnimation, setShowLogoAnimation] = useState(false);
-  const [showSupportedMenu, setShowSupportedMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -114,14 +112,6 @@ function App() {
     setShowLogoAnimation(true);
   };
 
-  const supportedPlatforms = [
-    'X / Twitter (Web & App)',
-    'iPhone & iPad (Safari, Chrome)',
-    'Android Phones & Tablets',
-    'Mac & Windows Desktop',
-    'Chromebook & Linux'
-  ];
-
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col pb-safe">
       {showLogoAnimation && (
@@ -159,37 +149,6 @@ function App() {
               API
             </button>
           </nav>
-          <div 
-            className="relative"
-            onMouseLeave={() => setShowSupportedMenu(false)}
-          >
-            <button
-              type="button"
-              onClick={() => setShowSupportedMenu((prev) => !prev)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-900 transition-colors min-h-[44px]"
-            >
-              <Globe size={16} />
-              Supported Sites
-            </button>
-            {showSupportedMenu && (
-              <div className="absolute right-0 mt-2 w-64 rounded-2xl border border-slate-100 bg-white shadow-lg shadow-slate-900/5 p-4 text-left space-y-2 z-20">
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400">
-                  Works Great On
-                </p>
-                <ul className="mt-2 space-y-1 text-sm text-slate-600">
-                  {supportedPlatforms.map((platform) => (
-                    <li 
-                      key={platform}
-                      className="flex items-center gap-2 py-1"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-slate-300" />
-                      <span>{platform}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Mobile Menu Button */}
@@ -230,20 +189,6 @@ function App() {
               >
                 API
               </button>
-              <div className="border-t border-slate-200 my-2"></div>
-              <div className="px-4 py-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400 mb-3">
-                  Works Great On
-                </p>
-                <ul className="space-y-2 text-sm text-slate-600">
-                  {supportedPlatforms.map((platform) => (
-                    <li key={platform} className="flex items-center gap-2 py-1">
-                      <span className="w-2 h-2 rounded-full bg-slate-300" />
-                      <span>{platform}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
             </nav>
           </div>
         )}
