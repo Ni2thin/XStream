@@ -42,8 +42,10 @@ app = FastAPI()
 origins = [
     "http://localhost:5173",  # Vite default
     "http://localhost:3000",  # Common frontend port
+    "http://localhost:3001",  # Vite alternate port
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
     "https://xstream-five.vercel.app",  # Production frontend
     "https://xstream-v1.vercel.app",  # New production domain
 ]
@@ -194,6 +196,45 @@ async def get_video_data(payload: URLPayload):
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
 
 
+# --- Preview Proxy Route ---
+@app.get("/api/preview")
+async def preview_video(url: str):
+    """Proxies video for preview to handle CORS restrictions."""
+    try:
+        # Validate that the URL is from Twitter/X video domain
+        parsed_url = urlparse(url)
+        if 'video.twimg.com' not in parsed_url.netloc and 'twimg.com' not in parsed_url.netloc:
+            raise HTTPException(status_code=400, detail="Invalid video URL")
+        
+        # Stream the video from Twitter with proper headers
+        headers = {
+            'Referer': 'https://x.com/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(url, stream=True, timeout=30, headers=headers)
+        response.raise_for_status()
+        
+        def generate():
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        
+        return StreamingResponse(
+            generate(),
+            media_type="video/mp4",
+            headers={
+                "Content-Type": "video/mp4",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(response.headers.get('content-length', '')),
+                "Cache-Control": "public, max-age=3600",
+            }
+        )
+    except requests.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load video: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+
+
 # --- Download Proxy Route ---
 @app.get("/api/download")
 async def download_video(url: str):
@@ -210,8 +251,12 @@ async def download_video(url: str):
         if 'video.twimg.com' not in parsed_url.netloc and 'twimg.com' not in parsed_url.netloc:
             raise HTTPException(status_code=400, detail="Invalid video URL")
         
-        # Stream the video from Twitter
-        response = requests.get(url, stream=True, timeout=30)
+        # Stream the video from Twitter with proper headers
+        headers = {
+            'Referer': 'https://x.com/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        response = requests.get(url, stream=True, timeout=30, headers=headers)
         response.raise_for_status()
         
         # Get filename from URL or use default

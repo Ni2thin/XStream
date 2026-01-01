@@ -32,8 +32,14 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({ data, onReset }) => 
   }
 
   // Get the first video URL for preview (highest quality, skip MP3 options)
-  const previewOption = data.options.find(opt => !opt.url.startsWith('mp3:'));
-  const previewUrl = previewOption?.url || (data as any).previewUrl || '';
+  const previewOption = data.options.find(opt => opt.url && !opt.url.startsWith('mp3:'));
+  const rawPreviewUrl = previewOption?.url || (data as any).previewUrl || '';
+  
+  // Use backend proxy for preview to handle CORS restrictions
+  const previewUrl = rawPreviewUrl && rawPreviewUrl.startsWith('http') 
+    ? `${getApiBaseUrl()}/api/preview?url=${encodeURIComponent(rawPreviewUrl)}`
+    : rawPreviewUrl;
+  
   const thumbnailUrl = (data as any).thumbnailUrl || '';
   const duration = (data as any).duration || '';
   const author = (data as any).author || 'Twitter User';
@@ -183,8 +189,8 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({ data, onReset }) => 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {data.options.map((option, index) => {
                 const optionId = (option as any).id || option.quality || `option-${index}`;
-                const isBest = index === 0 && !option.url.startsWith('mp3:'); // First video option is highest quality
-                const isMp3 = option.url.startsWith('mp3:');
+                const isBest = index === 0 && option.url && !option.url.startsWith('mp3:'); // First video option is highest quality
+                const isMp3 = option.url && option.url.startsWith('mp3:');
                 const extension = isMp3 ? 'mp3' : ((option as any).extension || 'mp4');
                 const size = (option as any).size || '';
                 
