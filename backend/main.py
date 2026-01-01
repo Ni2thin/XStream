@@ -179,6 +179,14 @@ def extract_video_metadata(tweet_url: str, include_mp3: bool = False) -> VideoMe
         raise HTTPException(status_code=500, detail=f"Internal server error during processing: {str(e)}")
 
 
+# --- Health Check Route ---
+@app.get("/")
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint for monitoring and keep-alive."""
+    return {"status": "ok", "service": "xstream-backend"}
+
+
 # --- API Route ---
 @app.post("/api/video", response_model=VideoMetadata)
 async def get_video_data(payload: URLPayload):

@@ -134,7 +134,45 @@ origins = [
 
 ## Notes
 
-- **Free tier limitations**: Render free tier spins down after 15 minutes of inactivity. First request may be slow.
+- **Free tier limitations**: Render free tier spins down after 15 minutes of inactivity. First request may be slow (30-60 seconds cold start).
 - **yt-dlp**: Already included in `requirements.txt` as a Python package, so it will be installed automatically.
 - **Port**: Render provides `$PORT` environment variable automatically.
+
+## Render Free Tier Spin-Down (Normal Behavior)
+
+**This is expected!** Render's free tier automatically shuts down services after 15 minutes of inactivity to save resources. You'll see logs like:
+```
+INFO: Shutting down
+INFO: Waiting for application shutdown.
+INFO: Application shutdown complete.
+```
+
+### Solutions:
+
+**Option 1: Use a Free Keep-Alive Service (Recommended for Free Tier)**
+- Sign up for a free service like [UptimeRobot](https://uptimerobot.com) or [cron-job.org](https://cron-job.org)
+- Set up a monitor/HTTP request to ping your backend every 10-14 minutes
+- Use your health check endpoint: `https://your-backend.onrender.com/health`
+- This keeps your service alive without upgrading
+
+**Option 2: Upgrade to Paid Plan**
+- Render paid plans ($7/month+) keep services running 24/7
+- No spin-down, instant responses
+
+**Option 3: Accept the Cold Start**
+- Service automatically restarts on first request
+- Takes 30-60 seconds for first request after spin-down
+- Subsequent requests are fast until next spin-down
+
+### Health Check Endpoint
+
+Your backend now includes a health check endpoint at `/health` that returns:
+```json
+{"status": "ok", "service": "xstream-backend"}
+```
+
+You can use this for:
+- Render health checks (already configured in `render.yaml`)
+- External monitoring services
+- Keep-alive pings
 
