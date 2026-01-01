@@ -12,7 +12,9 @@ import {
   MousePointerClick,
   Download,
   HelpCircle,
-  Globe
+  Globe,
+  Menu,
+  X as XIcon
 } from 'lucide-react';
 import Lottie from 'lottie-react';
 import xstreamAnimation from './assets/xstream.json';
@@ -43,6 +45,8 @@ function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showLogoAnimation, setShowLogoAnimation] = useState(false);
   const [showSupportedMenu, setShowSupportedMenu] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const handleFetch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +88,27 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [showLogoAnimation]);
 
+  // Detect mobile screen size
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 640);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Close mobile menu when clicking outside
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('header')) {
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [mobileMenuOpen]);
+
   const handleLogoClick = () => {
     if (showLogoAnimation) return;
     setShowLogoAnimation(true);
@@ -98,7 +123,7 @@ function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="min-h-screen bg-slate-50 flex flex-col pb-safe">
       {showLogoAnimation && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/90 backdrop-blur-md">
           <div className="flex flex-col items-center gap-4">
@@ -109,17 +134,19 @@ function App() {
       )}
 
       {/* Header */}
-      <header className="py-6 px-6 md:px-12 flex justify-between items-center max-w-7xl mx-auto w-full">
+      <header className="py-4 sm:py-6 px-4 sm:px-6 md:px-12 flex justify-between items-center max-w-7xl mx-auto w-full relative pt-safe">
         <button
           type="button"
           onClick={handleLogoClick}
-          className="flex items-center space-x-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400 rounded-lg px-1 py-1 transition"
+          className="flex items-center space-x-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-slate-400 rounded-lg px-1 py-1 transition min-h-[44px]"
         >
           <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
             <Zap className="text-white w-5 h-5" fill="currentColor" />
           </div>
-          <span className="text-xl font-bold tracking-tight text-slate-900">XStream</span>
+          <span className="text-lg sm:text-xl font-bold tracking-tight text-slate-900">XStream</span>
         </button>
+        
+        {/* Desktop Navigation */}
         <div className="hidden md:flex items-center space-x-6 text-sm font-medium text-slate-500">
           <nav className="flex space-x-6">
             <a href="#how-to-use" className="hover:text-slate-900 transition-colors">How to use</a>
@@ -139,7 +166,7 @@ function App() {
             <button
               type="button"
               onClick={() => setShowSupportedMenu((prev) => !prev)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-900 transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-900 transition-colors min-h-[44px]"
             >
               <Globe size={16} />
               Supported Sites
@@ -164,72 +191,146 @@ function App() {
             )}
           </div>
         </div>
+
+        {/* Mobile Menu Button */}
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="md:hidden p-2 text-slate-600 hover:text-slate-900 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+          aria-label="Toggle menu"
+        >
+          {mobileMenuOpen ? <XIcon size={24} /> : <Menu size={24} />}
+        </button>
+
+        {/* Mobile Menu */}
+        {mobileMenuOpen && (
+          <div className="absolute top-full left-0 right-0 mt-2 mx-4 bg-white rounded-2xl shadow-xl border border-slate-200 py-4 z-50 md:hidden">
+            <nav className="flex flex-col space-y-1 px-4">
+              <a 
+                href="#how-to-use" 
+                className="px-4 py-3 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors font-medium"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                How to use
+              </a>
+              <a 
+                href="#faqs" 
+                className="px-4 py-3 text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors font-medium"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                FAQ
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  alert('Sorry Maamey innum vidala');
+                  setMobileMenuOpen(false);
+                }}
+                className="px-4 py-3 text-left text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-lg transition-colors font-medium"
+              >
+                API
+              </button>
+              <div className="border-t border-slate-200 my-2"></div>
+              <div className="px-4 py-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-400 mb-3">
+                  Works Great On
+                </p>
+                <ul className="space-y-2 text-sm text-slate-600">
+                  {supportedPlatforms.map((platform) => (
+                    <li key={platform} className="flex items-center gap-2 py-1">
+                      <span className="w-2 h-2 rounded-full bg-slate-300" />
+                      <span>{platform}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </nav>
+          </div>
+        )}
       </header>
 
       {/* Main Content */}
-      <main className="flex-grow flex flex-col items-center px-4 sm:px-6 relative">
+      <main className="flex-grow flex flex-col items-center px-4 sm:px-6 lg:px-8 relative">
         
         {/* Background Decoration */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-gradient-to-b from-slate-200/50 to-transparent -z-10 blur-3xl opacity-50 pointer-events-none" />
 
-        <div className="w-full max-w-3xl mx-auto pt-12 pb-20 text-center z-10">
+        <div className="w-full max-w-3xl mx-auto pt-8 sm:pt-12 pb-12 sm:pb-20 text-center z-10">
           
           {status === 'idle' || status === 'loading' || status === 'error' ? (
             <>
-              <div className="mb-10 space-y-4">
-                <h1 className="text-4xl md:text-6xl font-extrabold text-slate-900 tracking-tight leading-tight">
+              <div className="mb-8 sm:mb-10 space-y-3 sm:space-y-4 px-2">
+                <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold text-slate-900 tracking-tight leading-tight">
                   Download X Videos <br />
                   <span className="text-transparent bg-clip-text bg-gradient-to-r from-slate-700 to-slate-400">
                     Simple. Fast. Free.
                   </span>
                 </h1>
-                <p className="text-lg text-slate-600 max-w-2xl mx-auto">
+                <p className="text-base sm:text-lg text-slate-600 max-w-2xl mx-auto px-2">
                   Save videos and GIFs from Twitter (X) in high quality MP4 and MP3 formats directly to your device. No registration required.
                 </p>
               </div>
 
-              <div className="w-full max-w-2xl mx-auto">
+              <div className="w-full max-w-2xl mx-auto px-2">
                 <form onSubmit={handleFetch} className="relative group">
                   <div className="absolute inset-0 bg-gradient-to-r from-slate-200 to-slate-300 rounded-2xl blur transition duration-500 opacity-25 group-hover:opacity-50 pointer-events-none"></div>
-                  <div className="relative bg-white p-2 rounded-2xl shadow-xl ring-1 ring-slate-900/5 flex items-center gap-3 p-2 pr-3">
-                    <div className="pl-4 text-slate-400 flex-shrink-0">
-                      <LinkIcon size={20} />
+                  <div className="relative bg-white p-2 rounded-2xl shadow-xl ring-1 ring-slate-900/5 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-1">
+                      <div className="pl-3 sm:pl-4 text-slate-400 flex-shrink-0">
+                        <LinkIcon size={20} />
+                      </div>
+                      <input
+                        type="text"
+                        value={url}
+                        onChange={(e) => setUrl(e.target.value)}
+                        placeholder={isMobile ? "Paste tweet link..." : "Paste tweet link here (e.g. https://x.com/...)"}
+                        className="flex-grow bg-transparent border-none focus:ring-0 text-slate-900 placeholder-slate-400 h-12 sm:h-14 px-2 sm:px-4 text-base sm:text-lg"
+                        disabled={status === 'loading'}
+                      />
                     </div>
-                    <input
-                      type="text"
-                      value={url}
-                      onChange={(e) => setUrl(e.target.value)}
-                      placeholder="Paste tweet link here (e.g. https://x.com/...)"
-                      className="flex-grow bg-transparent border-none focus:ring-0 text-slate-900 placeholder-slate-400 h-14 px-4 text-lg"
-                      disabled={status === 'loading'}
-                    />
-                    <button
-                      type="button"
-                      onClick={handlePaste}
-                      className="hidden sm:flex items-center px-3 py-1.5 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 flex-shrink-0 transition-colors"
-                    >
-                      Paste
-                    </button>
-                    <Button 
-                      type="submit" 
-                      isLoading={status === 'loading'}
-                      className="h-12 px-8 rounded-xl text-base flex-shrink-0"
-                    >
-                      Download
-                    </Button>
+                    <div className="flex gap-2 sm:gap-3">
+                      <button
+                        type="button"
+                        onClick={handlePaste}
+                        className="sm:hidden flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 flex-shrink-0 transition-colors min-h-[48px] min-w-[80px]"
+                      >
+                        Paste
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handlePaste}
+                        className="hidden sm:flex items-center px-3 py-1.5 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 flex-shrink-0 transition-colors min-h-[44px]"
+                      >
+                        Paste
+                      </button>
+                      <Button 
+                        type="submit" 
+                        isLoading={status === 'loading'}
+                        className="h-12 sm:h-12 px-6 sm:px-8 rounded-xl text-base flex-1 sm:flex-shrink-0 min-w-[120px] min-h-[48px]"
+                      >
+                        Download
+                      </Button>
+                    </div>
                   </div>
                   
                 </form>
 
+                {status === 'loading' && (
+                  <div className="mt-4 text-center">
+                    <p className="text-sm text-slate-500">Processing your link...</p>
+                  </div>
+                )}
+
                 {status === 'error' && (
                   <div className="mt-4 p-4 bg-red-50 text-red-600 rounded-xl border border-red-100 flex items-center animate-in slide-in-from-top-2">
-                    <span className="mr-2">⚠️</span> {errorMessage}
+                    <span className="mr-2">⚠️</span> 
+                    <span className="text-sm sm:text-base">{errorMessage}</span>
                   </div>
                 )}
               </div>
 
               {/* Feature Highlights */}
-              <div className="mt-24 grid grid-cols-1 md:grid-cols-3 gap-8 text-left">
+              <div className="mt-12 sm:mt-16 md:mt-24 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 md:gap-8 text-left px-2">
                 <div className="p-6 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
                   <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 mb-4">
                     <Zap size={20} />
@@ -254,14 +355,14 @@ function App() {
               </div>
 
               {/* How to Use */}
-              <div id="how-to-use" className="mt-16 bg-white border border-slate-100 rounded-3xl p-8 shadow-sm scroll-mt-24">
+              <div id="how-to-use" className="mt-12 sm:mt-16 bg-white border border-slate-100 rounded-2xl sm:rounded-3xl p-6 sm:p-8 shadow-sm scroll-mt-24 mx-2 sm:mx-0">
                 <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
-                  <div className="text-left">
+                  <div className="text-left w-full sm:w-auto">
                     <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">How to use</p>
-                    <h3 className="text-2xl md:text-3xl font-bold text-slate-900">3 easy steps to download</h3>
+                    <h3 className="text-xl sm:text-2xl md:text-3xl font-bold text-slate-900">3 easy steps to download</h3>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
                   {[
                     { icon: ClipboardList, title: 'Copy the Tweet Link', text: 'Tap the share icon on the tweet and copy the link to the post you want.' },
                     { icon: MousePointerClick, title: 'Paste the Link', text: 'Paste into the input box above and hit download. No login required.' },
@@ -289,19 +390,19 @@ function App() {
 
       {/* FAQ Section */}
       <section id="faqs" className="bg-white border-t border-slate-200 scroll-mt-24">
-        <div className="max-w-5xl mx-auto px-6 py-16">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
           <div className="flex items-center gap-3 mb-6">
-            <HelpCircle className="text-slate-500" />
+            <HelpCircle className="text-slate-500" size={20} />
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">Support</p>
           </div>
-          <h3 className="text-3xl font-bold text-slate-900 mb-6">FAQs & Supported Platforms</h3>
+          <h3 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-6">FAQs & Supported Platforms</h3>
           <div className="space-y-4">
             {faqs.map((item) => (
-              <details key={item.question} className="group border border-slate-200 rounded-2xl p-5 transition-colors">
-                <summary className="flex items-center justify-between cursor-pointer text-left text-slate-900 font-semibold text-lg">
-                  {item.question}
-                  <span className="text-slate-400 group-open:hidden">+</span>
-                  <span className="text-slate-400 hidden group-open:inline">−</span>
+              <details key={item.question} className="group border border-slate-200 rounded-xl sm:rounded-2xl p-4 sm:p-5 transition-colors">
+                <summary className="flex items-center justify-between cursor-pointer text-left text-slate-900 font-semibold text-base sm:text-lg min-h-[44px] items-center">
+                  <span className="flex-1 pr-4">{item.question}</span>
+                  <span className="text-slate-400 text-xl group-open:hidden flex-shrink-0">+</span>
+                  <span className="text-slate-400 text-xl hidden group-open:inline flex-shrink-0">−</span>
                 </summary>
                 <p className="mt-3 text-slate-500 text-sm leading-relaxed">
                   {item.answer}
@@ -313,8 +414,8 @@ function App() {
       </section>
 
       {/* Footer */}
-      <footer className="py-8 text-center text-slate-400 text-sm border-t border-slate-200 bg-white">
-        <div className="max-w-7xl mx-auto px-6">
+      <footer className="py-6 sm:py-8 text-center text-slate-400 text-xs sm:text-sm border-t border-slate-200 bg-white pb-safe">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <p>&copy; {new Date().getFullYear()} XStream Downloader. Not affiliated with X Corp.</p>
         </div>
       </footer>
