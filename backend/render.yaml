@@ -2,8 +2,12 @@ services:
   - type: web
     name: xstream-backend
     env: python
+    # Option 1: Set Root Directory to "backend" in Render dashboard, then use:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    # Option 2: Leave Root Directory empty, then use:
+    # buildCommand: pip install -r backend/requirements.txt
+    # startCommand: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.0

@@ -36,9 +36,13 @@ View your app in AI Studio: https://ai.studio/apps/drive/1_tftd9ekPDgwNfycI_w_kS
 1. **Deploy Backend to Render:**
    - Go to https://dashboard.render.com
    - Create new Web Service from your GitHub repo
-   - Root Directory: `backend` (or leave empty and use `cd backend &&` in start command)
-   - Build Command: `pip install -r backend/requirements.txt`
-   - Start Command: `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT`
+   - **Choose ONE option:**
+     - **Option A (Recommended):** Set Root Directory to `backend`, then:
+       - Build Command: `pip install -r requirements.txt`
+       - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+     - **Option B:** Leave Root Directory empty, then:
+       - Build Command: `pip install -r backend/requirements.txt`
+       - Start Command: `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT`
    - Copy your Render backend URL (e.g., `https://xstream-backend.onrender.com`)
 
 2. **Configure Vercel:**

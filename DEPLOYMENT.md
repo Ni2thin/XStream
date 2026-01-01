@@ -31,9 +31,18 @@ This guide will help you deploy XStream to production.
 3. **Configure the service:**
    - **Name**: `xstream-backend` (or any name you prefer)
    - **Environment**: `Python 3`
+   
+   **IMPORTANT: Choose ONE of these options:**
+   
+   **Option A (Recommended): Set Root Directory**
+   - **Root Directory**: `backend`
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+   
+   **Option B: Leave Root Directory Empty**
+   - **Root Directory**: (leave empty)
    - **Build Command**: `pip install -r backend/requirements.txt`
    - **Start Command**: `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT`
-   - **Root Directory**: Leave empty (or set to `backend` if you prefer)
 
 4. **Environment Variables** (optional):
    - `PYTHON_VERSION`: `3.10.0` (or latest 3.10.x)
