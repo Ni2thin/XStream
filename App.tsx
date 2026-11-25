@@ -47,6 +47,14 @@ function App() {
   const [isMobile, setIsMobile] = useState(false);
   const isBusy = status === 'connecting' || status === 'loading';
 
+  const updateUrl = (value: string) => {
+    setUrl(value);
+    if (status === 'error') {
+      setStatus('idle');
+      setErrorMessage(null);
+    }
+  };
+
   const handleFetch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim() || isBusy) return;
@@ -69,7 +77,7 @@ function App() {
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      setUrl(text);
+      updateUrl(text);
     } catch (err) {
       console.error('Failed to read clipboard');
     }
@@ -230,7 +238,8 @@ function App() {
                       <input
                         type="text"
                         value={url}
-                        onChange={(e) => setUrl(e.target.value)}
+                        onChange={(e) => updateUrl(e.target.value)}
+                        aria-label="X post link"
                         placeholder={isMobile ? "Paste tweet link..." : "Paste tweet link here (e.g. https://x.com/...)"}
                         className="flex-grow bg-transparent border-none focus:ring-0 text-slate-900 placeholder-slate-400 h-12 sm:h-14 px-2 sm:px-4 text-base sm:text-lg"
                         disabled={isBusy}
@@ -258,7 +267,7 @@ function App() {
                         isLoading={isBusy}
                         className="h-12 sm:h-12 px-6 sm:px-8 rounded-xl text-base flex-1 sm:flex-shrink-0 min-w-[120px] min-h-[48px]"
                       >
-                        Download
+                        {status === 'error' ? 'Try again' : 'Find video'}
                       </Button>
                     </div>
                   </div>
@@ -269,8 +278,8 @@ function App() {
                   <div className="mt-4 text-center">
                     <p role="status" className="text-sm text-slate-500">
                       {status === 'connecting'
-                        ? 'Connecting to the downloader. If it has been idle, startup can take about a minute.'
-                        : 'Processing your link...'}
+                        ? 'Starting the downloader. After it has been idle, this can take about a minute.'
+                        : 'Finding the video…'}
                     </p>
                   </div>
                 )}
@@ -319,7 +328,7 @@ function App() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
                   {[
                     { icon: ClipboardList, title: 'Copy the Tweet Link', text: 'Tap the share icon on the tweet and copy the link to the post you want.' },
-                    { icon: MousePointerClick, title: 'Paste the Link', text: 'Paste into the input box above and hit download. No login required.' },
+                    { icon: MousePointerClick, title: 'Paste the Link', text: 'Paste the post link above and select Find video.' },
                     { icon: Download, title: 'Choose Quality & Save', text: 'Select the MP4 or MP3 format you need and save directly to your device.' },
                   ].map((step, idx) => (
                     <div key={step.title} className="p-6 rounded-2xl border border-slate-100 hover:border-slate-200 transition-colors text-left">

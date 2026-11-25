@@ -4,12 +4,13 @@ import re
 import shutil
 import subprocess
 import tempfile
-from urllib.parse import urlsplit
+from typing import Annotated
+from urllib.parse import quote, urlsplit
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, validator
 from starlette.background import BackgroundTask
 
@@ -18,7 +19,8 @@ POST_HOSTS = frozenset(
     for domain in ("x.com", "twitter.com")
     for prefix in ("", "www.", "m.", "mobile.")
 )
-MEDIA_HOSTS = frozenset({"video.twimg.com", "pbs.twimg.com"})
+THUMBNAIL_HOSTS = frozenset({"pbs.twimg.com"})
+MEDIA_HOSTS = THUMBNAIL_HOSTS | {"video.twimg.com"}
 TWITTER_EXTRACTORS = "twitter,twitter:card,twitter:amplify,twitter:broadcast,twitter:spaces"
 
 
@@ -56,11 +58,14 @@ def validate_post_url(url: str) -> str:
 class DownloadOption(BaseModel):
     quality: str
     url: str  # Changed from HttpUrl to str to allow "mp3:" prefix for MP3 conversion
+    sizeBytes: int | None = None
 
 class VideoMetadata(BaseModel):
     id: str
     title: str
     options: list[DownloadOption]
+    thumbnailUrl: str | None = None
+    durationSeconds: float | None = None
 
 class URLPayload(BaseModel):
     url: str
@@ -135,69 +140,48 @@ def extract_video_metadata(tweet_url: str, include_mp3: bool = False) -> VideoMe
         title = info.get('title', 'Video')
         video_id = info.get('id', 'unknown_id')
         
-        options_map: dict[str, DownloadOption] = {}
-        
-        # First, try to get the direct URL from the selected format
-        best_url = normalize_allowed_url(info.get('url') or '', MEDIA_HOSTS)
-        if best_url and info.get('ext') == 'mp4':
-            height = info.get('height') or info.get('format_note', '').replace('p', '')
-            if height:
-                try:
-                    height_int = int(str(height).replace('p', ''))
-                    if height_int >= 360:
-                        quality = f"{height_int}p"
-                        options_map[quality] = DownloadOption(quality=quality, url=best_url)
-                except (ValueError, AttributeError):
-                    pass
-        
-        # Also iterate through all formats to find direct MP4 download links
-        for fmt in info.get('formats', []):
-            fmt_ext = fmt.get('ext', '').lower()
-            fmt_url = normalize_allowed_url(fmt.get('url') or '', MEDIA_HOSTS)
-            
-            if fmt_ext == 'mp4' and fmt_url:
-                height = fmt.get('height')
-                
-                if height and height >= 360:  # Filter out very low-res or non-video streams
-                    quality = f"{height}p"
-                    
-                    # Store only the highest quality found for a given resolution level
-                    if quality not in options_map:
-                        options_map[quality] = DownloadOption(quality=quality, url=fmt_url)
-        
-        final_options = list(options_map.values())
-        
-        # If no suitable options are found, try to use the best available format
-        if not final_options:
-            # Fallback: use the best format available, even if not MP4
-            if best_url:
-                height = info.get('height') or 720
-                quality = f"{height}p" if height else "best"
-                final_options = [DownloadOption(quality=quality, url=best_url)]
-            else:
-                raise ValueError("Could not find suitable download links. Video may be private, deleted, or embedded differently.")
+        formats = (info, *reversed(info.get("formats") or []))
+        options_by_height: dict[int, DownloadOption] = {}
+        # The download proxy serves complete MP4 files. A streaming manifest is not an MP4 file.
+        for fmt in formats:
+            if (
+                fmt.get("ext") != "mp4"
+                or fmt.get("protocol") not in (None, "http", "https")
+                or fmt.get("vcodec") == "none"
+            ):
+                continue
 
-        # Sort options from highest to lowest quality (only sort video options)
-        video_options = [opt for opt in final_options if not opt.url.startswith('mp3:')]
-        mp3_options = [opt for opt in final_options if opt.url.startswith('mp3:')]
-        
-        video_options.sort(key=lambda x: int(x.quality.replace('p', '')) if x.quality.replace('p', '').isdigit() else 0, reverse=True)
-        
-        # Add MP3 option if requested (add it at the end, after video options)
+            media_url = normalize_allowed_url(fmt.get("url") or "", MEDIA_HOSTS)
+            if media_url is None or urlsplit(media_url).path.lower().endswith((".m3u8", ".mpd")):
+                continue
+
+            height = fmt.get("height")
+            height = height if isinstance(height, int) and height > 0 else 0
+            if height not in options_by_height:
+                options_by_height[height] = DownloadOption(
+                    quality=f"{height}p" if height else "Original",
+                    url=media_url,
+                    sizeBytes=fmt.get("filesize"),
+                )
+
+        options = [options_by_height[height] for height in sorted(options_by_height, reverse=True)]
         if include_mp3:
-            # Store the tweet URL for MP3 conversion
-            mp3_option = DownloadOption(quality="320kbps", url=f"mp3:{tweet_url}")
-            mp3_options.append(mp3_option)
-            print(f"DEBUG: Added MP3 option with URL: mp3:{tweet_url}")  # Debug log
-        
-        # Combine video and MP3 options
-        final_options = video_options + mp3_options
-        print(f"DEBUG: Final options count: {len(final_options)}, MP3 count: {len(mp3_options)}")  # Debug log
+            # Posts without a direct MP4 can still have an audio stream that yt-dlp can convert.
+            if options or any(
+                fmt.get("acodec") not in (None, "none")
+                and normalize_allowed_url(fmt.get("url") or "", MEDIA_HOSTS)
+                for fmt in formats
+            ):
+                options.append(DownloadOption(quality="320kbps", url=f"mp3:{tweet_url}"))
+        if not options:
+            raise ValueError("Could not find downloadable media. Try a different X post.")
         
         return VideoMetadata(
             id=video_id,
             title=title,
-            options=final_options
+            options=options,
+            thumbnailUrl=normalize_allowed_url(info.get("thumbnail") or "", THUMBNAIL_HOSTS),
+            durationSeconds=info.get("duration"),
         )
 
     except subprocess.CalledProcessError as e:
@@ -246,10 +230,32 @@ async def get_video_data(payload: URLPayload):
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
 
 
-def stream_media(url: str, *, download: bool = False) -> StreamingResponse:
+def mp4_attachment(filename: str) -> str:
+    stem = re.sub(r'[\x00-\x1f\x7f<>:"/\\|?*]', "_", filename)
+    stem = stem.strip(" .")[:120].rstrip(" .") or "video"
+    fallback = re.sub(r"[^A-Za-z0-9 ._-]", "_", stem).strip(" ._") or "video"
+    encoded = quote(f"{stem}.mp4", safe="")
+    return f'attachment; filename="{fallback}.mp4"; filename*=UTF-8\'\'{encoded}'
+
+
+def stream_media(
+    url: str,
+    *,
+    download: bool = False,
+    filename: str | None = None,
+    byte_range: str | None = None,
+) -> Response:
     media_url = normalize_allowed_url(url, MEDIA_HOSTS)
     if media_url is None:
         raise HTTPException(status_code=400, detail="Invalid X video URL.")
+
+    upstream_headers = {
+        "Referer": "https://x.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept-Encoding": "identity",
+    }
+    if byte_range and re.fullmatch(r"bytes=(?:[0-9]+-[0-9]*|-[0-9]+)", byte_range, re.IGNORECASE):
+        upstream_headers["Range"] = byte_range
 
     try:
         response = requests.get(
@@ -258,16 +264,17 @@ def stream_media(url: str, *, download: bool = False) -> StreamingResponse:
             timeout=30,
             # Only contact the validated CDN origin.
             allow_redirects=False,
-            headers={
-                "Referer": "https://x.com/",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept-Encoding": "identity",
-            },
+            headers=upstream_headers,
         )
     except requests.RequestException as e:
         raise HTTPException(status_code=502, detail="Could not fetch video from X.") from e
 
-    if response.status_code != 200:
+    if response.status_code == 416:
+        content_range = response.headers.get("Content-Range")
+        response.close()
+        return Response(status_code=416, headers={"Content-Range": content_range} if content_range else None)
+
+    if response.status_code not in (200, 206):
         response.close()
         raise HTTPException(status_code=502, detail="Could not fetch video from X.")
 
@@ -275,15 +282,18 @@ def stream_media(url: str, *, download: bool = False) -> StreamingResponse:
     content_length = response.headers.get("Content-Length")
     if content_length and not response.headers.get("Content-Encoding"):
         headers["Content-Length"] = content_length
+    for header in ("Accept-Ranges", "Content-Range"):
+        if header in response.headers:
+            headers[header] = response.headers[header]
     if download:
-        filename = urlsplit(media_url).path.rsplit("/", 1)[-1] or "video.mp4"
-        filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
-        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        filename = filename or urlsplit(media_url).path.rsplit("/", 1)[-1].removesuffix(".mp4")
+        headers["Content-Disposition"] = mp4_attachment(filename)
     else:
         headers["Cache-Control"] = "public, max-age=3600"
 
     return StreamingResponse(
         response.iter_content(chunk_size=8192),
+        status_code=response.status_code,
         media_type="video/mp4",
         headers=headers,
         background=BackgroundTask(response.close),
@@ -291,15 +301,19 @@ def stream_media(url: str, *, download: bool = False) -> StreamingResponse:
 
 
 @app.get("/api/preview")
-def preview_video(url: str):
-    return stream_media(url)
+def preview_video(url: str, byte_range: Annotated[str | None, Header(alias="Range")] = None):
+    return stream_media(url, byte_range=byte_range)
 
 
 @app.get("/api/download")
-def download_video(url: str):
+def download_video(
+    url: str,
+    filename: Annotated[str | None, Query(max_length=200)] = None,
+    byte_range: Annotated[str | None, Header(alias="Range")] = None,
+):
     if url.startswith("mp3:"):
         return convert_to_mp3(url.removeprefix("mp3:"))
-    return stream_media(url, download=True)
+    return stream_media(url, download=True, filename=filename, byte_range=byte_range)
 
 
 # --- MP3 Conversion Function ---

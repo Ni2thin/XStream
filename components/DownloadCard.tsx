@@ -1,258 +1,271 @@
-import React, { useState, useRef } from 'react';
-import { VideoMetadata, DownloadOption } from '../types';
-import { Video, Music, Play, X } from 'lucide-react';
-import { getApiBaseUrl } from '../config';
+import { useEffect, useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
+import { ArrowLeft, ChevronDown, Download, Music, Play, Video, X } from 'lucide-react';
+import { API_BASE_URL } from '../config';
+import type { DownloadOption, VideoMetadata } from '../types';
+import { Button } from './Button';
 
 interface DownloadCardProps {
   data: VideoMetadata;
   onReset: () => void;
 }
 
-export const DownloadCard: React.FC<DownloadCardProps> = ({ data, onReset }) => {
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [isPreviewing, setIsPreviewing] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+type DownloadStatus = 'idle' | 'video-started' | 'converting' | 'saving' | 'audio-started' | 'audio-error';
 
-  const hasOptions = Array.isArray(data.options) && data.options.length > 0;
-  if (!hasOptions) {
-    return (
-      <div className="w-full max-w-xl bg-white rounded-3xl shadow-md border border-slate-200 p-8 text-center">
-        <p className="text-lg font-semibold text-slate-900 mb-2">No download links available</p>
-        <p className="text-sm text-slate-500">
-          We couldn’t find any downloadable media for this tweet. It might be private, deleted, or hosted elsewhere.
-        </p>
-        <button
-          onClick={onReset}
-          className="mt-6 inline-flex items-center justify-center px-5 py-2.5 rounded-full bg-slate-900 text-white font-medium hover:bg-slate-800 transition-colors"
-        >
-          Try another link
-        </button>
-      </div>
-    );
-  }
+const downloadMessages: Record<DownloadStatus, string> = {
+  idle: '',
+  'video-started': 'Check your browser’s downloads. If the MP4 doesn’t start, try the download again.',
+  converting: 'Converting to MP3…',
+  saving: 'Downloading MP3…',
+  'audio-started': 'The MP3 is ready. Check your browser’s downloads.',
+  'audio-error': 'Couldn’t finish the MP3 download.',
+};
 
-  // Get the first video URL for preview (highest quality, skip MP3 options)
-  const previewOption = data.options.find(opt => opt.url && !opt.url.startsWith('mp3:'));
-  const rawPreviewUrl = previewOption?.url || (data as any).previewUrl || '';
-  
-  // Use backend proxy for preview to handle CORS restrictions
-  const previewUrl = rawPreviewUrl && rawPreviewUrl.startsWith('http') 
-    ? `${getApiBaseUrl()}/api/preview?url=${encodeURIComponent(rawPreviewUrl)}`
-    : rawPreviewUrl;
-  
-  const thumbnailUrl = (data as any).thumbnailUrl || '';
-  const duration = (data as any).duration || '';
-  const author = (data as any).author || 'Twitter User';
-  const avatarUrl = (data as any).avatarUrl || '';
-  const aspectRatio = (data as any).aspectRatio || '16:9';
+const optionDetails = ({ quality, sizeBytes }: DownloadOption) => {
+  if (!sizeBytes || sizeBytes < 0) return quality;
+  const size = sizeBytes < 1_000_000
+    ? Math.round(sizeBytes / 1_000) + ' KB'
+    : (sizeBytes / 1_000_000).toFixed(1) + ' MB';
+  return quality + ' · ' + size;
+};
 
-  const handleDownload = async (option: DownloadOption) => {
-    if (!option.url) {
-      alert(`No download URL available for ${option.quality}`);
-      return;
-    }
+const formatDuration = (seconds?: number | null) => {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return null;
+  const totalSeconds = Math.round(seconds);
+  return Math.floor(totalSeconds / 60) + ':' + String(totalSeconds % 60).padStart(2, '0');
+};
 
-    setDownloadingId(option.quality);
-    
+export function DownloadCard({ data, onReset }: DownloadCardProps) {
+  const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>('idle');
+  const [preview, setPreview] = useState<'closed' | 'playing' | 'error'>('closed');
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const audioRequest = useRef<AbortController | null>(null);
+
+  const [bestVideo, ...otherVideos] = data.options.filter(option => !option.url.startsWith('mp3:'));
+  const audio = data.options.find(option => option.url.startsWith('mp3:'));
+  const title = data.title.trim() || 'X video';
+  const filename = title.slice(0, 100);
+  const duration = formatDuration(data.durationSeconds);
+  const isAudioBusy = downloadStatus === 'converting' || downloadStatus === 'saving';
+
+  useEffect(() => {
+    heading.current?.focus();
+    return () => {
+      const activeRequest = audioRequest.current;
+      audioRequest.current = null;
+      activeRequest?.abort();
+    };
+  }, []);
+
+  const startAudioDownload = async () => {
+    if (!audio || audioRequest.current) return;
+
+    const controller = new AbortController();
+    audioRequest.current = controller;
+    // Leave time to deliver the file after the backend's 180-second conversion budget.
+    const timeout = window.setTimeout(() => controller.abort(), 195_000);
+    setDownloadStatus('converting');
+
     try {
-      const isMp3 = option.url.startsWith('mp3:');
-      const fileExtension = isMp3 ? 'mp3' : 'mp4';
-      const fileName = `${data.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${option.quality}.${fileExtension}`;
-      
-      // Use backend proxy to handle CORS and ensure direct download
-      const apiBase = getApiBaseUrl();
-      const proxyUrl = `${apiBase}/api/download?url=${encodeURIComponent(option.url)}`;
-      
-      const response = await fetch(proxyUrl, {
-        method: 'GET',
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Download failed');
+      const params = new URLSearchParams({ url: audio.url });
+      const response = await fetch(API_BASE_URL + '/api/download?' + params, { signal: controller.signal });
+      if (!response.ok || !response.headers.get('Content-Type')?.startsWith('audio/')) {
+        throw new Error('MP3 conversion failed');
       }
-      
+
+      setDownloadStatus('saving');
       const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
+      if (audioRequest.current !== controller) return;
+
+      const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = fileName;
-      document.body.appendChild(link);
+      link.href = objectUrl;
+      link.download = filename.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, '_') + ' - ' + audio.quality + '.mp3';
+      document.body.append(link);
       link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(blobUrl);
-      setDownloadingId(null);
-    } catch (error: any) {
-      console.error('Download error:', error);
-      // For MP3, show a more helpful error message
-      if (option.url.startsWith('mp3:')) {
-        alert('MP3 conversion failed. This may take a moment. Please try again.');
-      } else {
-        // Fallback: try direct link
-        try {
-          const link = document.createElement('a');
-          link.href = option.url;
-          link.download = `${data.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${option.quality}.mp4`;
-          link.target = '_blank';
-          link.rel = 'noopener noreferrer';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        } catch (fallbackError) {
-          console.error('Fallback download error:', fallbackError);
-          alert('Download failed. Please try right-clicking on the video and selecting "Save video as..."');
-        }
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+      setDownloadStatus('audio-started');
+    } catch {
+      if (audioRequest.current === controller) {
+        setDownloadStatus('audio-error');
       }
-      setDownloadingId(null);
+    } finally {
+      window.clearTimeout(timeout);
+      if (audioRequest.current === controller) {
+        audioRequest.current = null;
+      }
     }
   };
 
-  const togglePreview = () => {
-    setIsPreviewing(!isPreviewing);
+  const videoDownloadHref = (option: DownloadOption) => {
+    const params = new URLSearchParams({
+      url: option.url,
+      filename: filename + ' - ' + option.quality,
+    });
+    return API_BASE_URL + '/api/download?' + params;
+  };
+
+  const startVideoDownload = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (audioRequest.current) {
+      event.preventDefault();
+      return;
+    }
+    setDownloadStatus('video-started');
   };
 
   return (
-    <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="flex flex-col lg:flex-row">
-        {/* Preview Section */}
-        <div className={`relative bg-slate-900 flex items-center justify-center overflow-hidden ${aspectRatio === '9:16' ? 'lg:w-1/3 h-96 lg:h-auto' : 'lg:w-1/2 h-64 lg:h-auto'}`}>
-            
-            {isPreviewing && previewUrl ? (
-              <div className="absolute inset-0 w-full h-full bg-black animate-in fade-in duration-300 z-20">
-                <video 
-                  ref={videoRef}
-                  src={previewUrl} 
-                  className="w-full h-full object-contain"
+    <section aria-labelledby="result-title" className="w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white text-left shadow-xl">
+      <div className={bestVideo ? 'grid md:grid-cols-2' : ''}>
+        {bestVideo && (
+          <div className="bg-slate-100 md:flex md:items-center">
+            <div className="relative aspect-video w-full overflow-hidden bg-slate-900">
+              {preview === 'playing' ? (
+                <video
+                  src={API_BASE_URL + '/api/preview?' + new URLSearchParams({ url: bestVideo.url })}
+                  aria-label="Video preview"
+                  className="h-full w-full object-contain"
                   controls
                   autoPlay
                   playsInline
                   crossOrigin="anonymous"
+                  onError={() => setPreview('error')}
                 />
-                <button 
-                  onClick={togglePreview}
-                  className="absolute top-4 right-4 p-2 bg-black/50 backdrop-blur-md rounded-full text-white/80 hover:text-white hover:bg-black/70 transition-all z-10"
-                  aria-label="Close Preview"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-            ) : previewUrl ? (
-              <>
-                <video 
-                  src={previewUrl}
-                  className="w-full h-full object-cover opacity-90"
-                  muted
-                  playsInline
-                  loop
-                  crossOrigin="anonymous"
-                />
-                <div 
-                  className="absolute inset-0 flex items-center justify-center cursor-pointer group bg-black/20"
-                  onClick={togglePreview}
-                >
-                  <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/50 shadow-2xl group-hover:scale-110 transition-transform duration-300">
-                    <Play className="w-8 h-8 text-white ml-1" fill="currentColor" />
-                  </div>
-                </div>
-                {duration && (
-                  <div className="absolute bottom-4 right-4 px-3 py-1 bg-black/60 backdrop-blur-md rounded-full text-white text-xs font-medium pointer-events-none">
-                    {duration}
-                  </div>
+              ) : (
+                <>
+                  {data.thumbnailUrl && !thumbnailFailed ? (
+                    <img
+                      src={data.thumbnailUrl}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      onError={() => setThumbnailFailed(true)}
+                      className="absolute inset-0 h-full w-full object-contain"
+                    />
+                  ) : (
+                    <Video aria-hidden="true" className="absolute left-4 top-4 h-5 w-5 text-slate-500" />
+                  )}
+                  {duration && (
+                    <span className="absolute bottom-3 right-3 rounded-md bg-black/70 px-2 py-1 text-xs font-medium text-white">
+                      {duration}
+                    </span>
+                  )}
+                </>
+              )}
+              <button
+                type="button"
+                aria-label={preview === 'playing' ? 'Close preview' : 'Play preview'}
+                aria-expanded={preview === 'playing'}
+                onClick={() => setPreview(preview === 'playing' ? 'closed' : 'playing')}
+                className={preview === 'playing'
+                  ? 'absolute right-3 top-3 grid h-11 w-11 place-items-center rounded-full bg-black/70 text-white hover:bg-black focus-visible:ring-2 focus-visible:ring-white'
+                  : 'absolute inset-0 flex items-center justify-center bg-black/10 text-white transition-colors hover:bg-black/25 focus-visible:outline focus-visible:-outline-offset-4 focus-visible:outline-white'}
+              >
+                {preview === 'playing' ? <X aria-hidden="true" size={20} /> : (
+                  <span className="grid h-14 w-14 place-items-center rounded-full bg-black/65 ring-1 ring-white/60">
+                    <Play aria-hidden="true" size={23} className="ml-0.5" fill="currentColor" />
+                  </span>
                 )}
-              </>
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-slate-400">
-                <Video size={48} />
-              </div>
-            )}
-        </div>
-
-        {/* Content Section */}
-        <div className="p-8 lg:w-2/3 flex flex-col">
-          {avatarUrl && (
-            <div className="flex items-center mb-4">
-              <img src={avatarUrl} alt="Author" className="w-10 h-10 rounded-full bg-slate-100" />
-              <div className="ml-3">
-                <p className="text-sm font-bold text-slate-900">{author}</p>
-                <p className="text-xs text-slate-500">Twitter / X</p>
-              </div>
+              </button>
             </div>
+          </div>
+        )}
+
+        <div className="min-w-0 p-5 sm:p-7">
+          <h2 id="result-title" ref={heading} tabIndex={-1} className="break-words text-xl font-bold leading-snug text-slate-900 outline-none">
+            {title}
+          </h2>
+          {preview === 'error' && (
+            <p role="status" className="mt-2 text-sm text-slate-600">The preview couldn’t load. You can still try downloading the video.</p>
           )}
 
-          <h2 className="text-xl font-bold text-slate-900 mb-6 leading-snug line-clamp-2">
-            {data.title}
-          </h2>
+          {bestVideo ? (
+            <a
+              href={videoDownloadHref(bestVideo)}
+              download
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-disabled={isAudioBusy}
+              onClick={startVideoDownload}
+              className="mt-5 flex min-h-[52px] items-center gap-3 rounded-xl bg-slate-900 px-4 py-2.5 font-semibold text-white shadow-md transition-colors hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 aria-disabled:opacity-60"
+            >
+              <Download aria-hidden="true" size={20} className="shrink-0" />
+              <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                <span>Download MP4</span>
+                <span className="text-sm font-medium text-slate-300">{optionDetails(bestVideo)}</span>
+              </span>
+            </a>
+          ) : audio ? (
+            <Button type="button" fullWidth isLoading={isAudioBusy} onClick={startAudioDownload} className="mt-5">
+              Download MP3
+            </Button>
+          ) : (
+            <p className="mt-3 text-sm text-slate-600">This post has no downloadable media.</p>
+          )}
 
-          <div className="space-y-3 flex-grow">
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Available Formats</h3>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {data.options.map((option, index) => {
-                const optionId = (option as any).id || option.quality || `option-${index}`;
-                const isBest = index === 0 && option.url && !option.url.startsWith('mp3:'); // First video option is highest quality
-                const isMp3 = option.url && option.url.startsWith('mp3:');
-                const extension = isMp3 ? 'mp3' : ((option as any).extension || 'mp4');
-                const size = (option as any).size || '';
-                
-                return (
-                  <button
-                    key={optionId}
-                    onClick={() => handleDownload(option)}
-                    disabled={!!downloadingId}
-                    className={`
-                      relative group flex items-center justify-between gap-4 p-4 rounded-2xl border text-left transition-all duration-200
-                      ${isMp3
-                        ? 'border-purple-500/30 bg-purple-50/50 hover:bg-purple-50 hover:border-purple-500'
-                        : isBest 
-                        ? 'border-blue-500/30 bg-blue-50/50 hover:bg-blue-50 hover:border-blue-500' 
-                        : 'border-slate-200 hover:border-slate-400 hover:bg-slate-50'
-                      }
-                      ${downloadingId ? 'opacity-75 cursor-not-allowed' : 'cursor-pointer'}
-                    `}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className={`
-                        w-12 h-12 rounded-2xl flex items-center justify-center
-                        ${extension === 'mp3' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-700'}
-                      `}>
-                        {extension === 'mp3' ? <Music size={22} /> : <Video size={22} />}
-                      </div>
-                      <div>
-                        <div className="font-bold text-slate-900 flex items-center gap-2 text-lg">
-                          {option.quality}
-                          {isMp3 && (
-                            <span className="px-2 py-0.5 bg-purple-600 text-white text-[10px] font-bold uppercase rounded-full tracking-wide">
-                              Audio
-                            </span>
-                          )}
-                          {isBest && !isMp3 && (
-                            <span className="px-2 py-0.5 bg-blue-600 text-white text-[10px] font-bold uppercase rounded-full tracking-wide">
-                              Best
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-slate-500 uppercase">
-                          {extension.toUpperCase()}{size ? ` • ${size}` : ''}
-                        </div>
-                      </div>
-                    </div>
-                    
-                  </button>
-                );
-              })}
+          {bestVideo && (otherVideos.length > 0 || audio) && (
+            <details className="group mt-3 rounded-xl border border-slate-200">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-slate-900 [&::-webkit-details-marker]:hidden">
+                More formats
+                <ChevronDown aria-hidden="true" size={16} className="transition-transform group-open:rotate-180" />
+              </summary>
+              <ul className="space-y-1 border-t border-slate-100 p-2">
+                {otherVideos.map(option => (
+                  <li key={option.quality}>
+                    <a
+                      href={videoDownloadHref(option)}
+                      download
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-disabled={isAudioBusy}
+                      onClick={startVideoDownload}
+                      className="flex min-h-11 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-800 hover:bg-slate-100 focus-visible:outline-slate-900 aria-disabled:opacity-60"
+                    >
+                      <Video aria-hidden="true" size={16} />
+                      Download MP4 <span className="text-slate-500">{optionDetails(option)}</span>
+                    </a>
+                  </li>
+                ))}
+                {audio && (
+                  <li>
+                    <button
+                      type="button"
+                      disabled={isAudioBusy}
+                      onClick={startAudioDownload}
+                      className="flex min-h-11 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-slate-800 hover:bg-slate-100 focus-visible:outline-slate-900 disabled:opacity-60"
+                    >
+                      <Music aria-hidden="true" size={16} />
+                      Download MP3 <span className="text-slate-500">{audio.quality}</span>
+                    </button>
+                  </li>
+                )}
+              </ul>
+            </details>
+          )}
+
+          {downloadStatus === 'audio-error' ? (
+            <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-x-2 rounded-lg bg-red-50 px-3 py-1 text-sm text-red-800">
+              <p>{downloadMessages[downloadStatus]}</p>
+              <button type="button" onClick={startAudioDownload} className="min-h-11 font-semibold underline underline-offset-2">
+                Retry MP3
+              </button>
             </div>
-          </div>
+          ) : (
+            <p role="status" className={downloadStatus === 'idle' ? 'sr-only' : 'mt-3 text-sm text-slate-600'}>
+              {downloadMessages[downloadStatus]}
+            </p>
+          )}
 
-          <div className="mt-8 pt-6 border-t border-slate-100 flex justify-between items-center">
-             <button 
-               onClick={onReset}
-               className="text-sm text-slate-500 hover:text-slate-900 font-medium transition-colors"
-             >
-               ← Paste another link
-             </button>
-          </div>
+          <button
+            type="button"
+            onClick={onReset}
+            className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900 focus-visible:outline-slate-900"
+          >
+            <ArrowLeft aria-hidden="true" size={16} />
+            Paste another link
+          </button>
         </div>
       </div>
-    </div>
+    </section>
   );
-};
+}
