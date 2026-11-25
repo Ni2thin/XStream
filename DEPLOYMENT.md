@@ -160,9 +160,8 @@ INFO: Application shutdown complete.
 - No spin-down, instant responses
 
 **Option 3: Accept the Cold Start**
-- Service automatically restarts on first request
-- Takes 30-60 seconds for first request after spin-down
-- Subsequent requests are fast until next spin-down
+- On submission, the frontend calls `/health` to wake the backend and waits up to 90 seconds for it to respond.
+- Once the backend is ready, the frontend sends the extraction request automatically. Users can retry if startup exceeds the wait.
 
 ### Health Check Endpoint
 

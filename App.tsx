@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { fetchTweetMetadata } from './services/api';
-import { VideoMetadata, ApiError } from './types';
+import { fetchTweetMetadata, waitForBackend } from './services/api';
+import type { VideoMetadata } from './types';
 import { Button } from './components/Button';
 import { DownloadCard } from './components/DownloadCard';
 import { 
@@ -39,27 +39,30 @@ const faqs = [
 
 function App() {
   const [url, setUrl] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'connecting' | 'loading' | 'success' | 'error'>('idle');
   const [videoData, setVideoData] = useState<VideoMetadata | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showLogoAnimation, setShowLogoAnimation] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const isBusy = status === 'connecting' || status === 'loading';
 
   const handleFetch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!url.trim()) return;
+    if (!url.trim() || isBusy) return;
 
-    setStatus('loading');
+    setStatus('connecting');
     setErrorMessage(null);
 
     try {
+      await waitForBackend();
+      setStatus('loading');
       const data = await fetchTweetMetadata(url);
       setVideoData(data);
       setStatus('success');
-    } catch (err: any) {
+    } catch (error) {
       setStatus('error');
-      setErrorMessage(err.message || 'Failed to fetch video');
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to fetch video.');
     }
   };
 
@@ -202,7 +205,7 @@ function App() {
 
         <div className="w-full max-w-3xl mx-auto pt-8 sm:pt-12 pb-12 sm:pb-20 text-center z-10">
           
-          {status === 'idle' || status === 'loading' || status === 'error' ? (
+          {status !== 'success' ? (
             <>
               <div className="mb-8 sm:mb-10 space-y-3 sm:space-y-4 px-2">
                 <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold text-slate-900 tracking-tight leading-tight">
@@ -230,13 +233,14 @@ function App() {
                         onChange={(e) => setUrl(e.target.value)}
                         placeholder={isMobile ? "Paste tweet link..." : "Paste tweet link here (e.g. https://x.com/...)"}
                         className="flex-grow bg-transparent border-none focus:ring-0 text-slate-900 placeholder-slate-400 h-12 sm:h-14 px-2 sm:px-4 text-base sm:text-lg"
-                        disabled={status === 'loading'}
+                        disabled={isBusy}
                       />
                     </div>
                     <div className="flex gap-2 sm:gap-3">
                       <button
                         type="button"
                         onClick={handlePaste}
+                        disabled={isBusy}
                         className="sm:hidden flex items-center justify-center px-4 py-2.5 text-sm font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 flex-shrink-0 transition-colors min-h-[48px] min-w-[80px]"
                       >
                         Paste
@@ -244,13 +248,14 @@ function App() {
                       <button
                         type="button"
                         onClick={handlePaste}
+                        disabled={isBusy}
                         className="hidden sm:flex items-center px-3 py-1.5 text-xs font-semibold text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 flex-shrink-0 transition-colors min-h-[44px]"
                       >
                         Paste
                       </button>
                       <Button 
                         type="submit" 
-                        isLoading={status === 'loading'}
+                        isLoading={isBusy}
                         className="h-12 sm:h-12 px-6 sm:px-8 rounded-xl text-base flex-1 sm:flex-shrink-0 min-w-[120px] min-h-[48px]"
                       >
                         Download
@@ -260,14 +265,18 @@ function App() {
                   
                 </form>
 
-                {status === 'loading' && (
+                {isBusy && (
                   <div className="mt-4 text-center">
-                    <p className="text-sm text-slate-500">Processing your link...</p>
+                    <p role="status" className="text-sm text-slate-500">
+                      {status === 'connecting'
+                        ? 'Connecting to the downloader. If it has been idle, startup can take about a minute.'
+                        : 'Processing your link...'}
+                    </p>
                   </div>
                 )}
 
                 {status === 'error' && (
-                  <div className="mt-4 p-4 bg-red-50 text-red-600 rounded-xl border border-red-100 flex items-center animate-in slide-in-from-top-2">
+                  <div role="alert" className="mt-4 p-4 bg-red-50 text-red-600 rounded-xl border border-red-100 flex items-center animate-in slide-in-from-top-2">
                     <span className="mr-2">⚠️</span> 
                     <span className="text-sm sm:text-base">{errorMessage}</span>
                   </div>

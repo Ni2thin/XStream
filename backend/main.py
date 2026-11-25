@@ -1,16 +1,55 @@
+import json
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+from urllib.parse import urlsplit
+
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, validator
 from starlette.background import BackgroundTask
-from pydantic import BaseModel, HttpUrl, validator
-import json
-import subprocess
-import shlex
-import shutil  # Used for checking if yt-dlp is available
-import tempfile
-import os
-import requests
-from urllib.parse import urlparse
+
+POST_HOSTS = frozenset(
+    f"{prefix}{domain}"
+    for domain in ("x.com", "twitter.com")
+    for prefix in ("", "www.", "m.", "mobile.")
+)
+MEDIA_HOSTS = frozenset({"video.twimg.com", "pbs.twimg.com"})
+TWITTER_EXTRACTORS = "twitter,twitter:card,twitter:amplify,twitter:broadcast,twitter:spaces"
+
+
+def normalize_allowed_url(url: str, hosts: frozenset[str], *, allow_http: bool = False) -> str | None:
+    if not url or "\\" in url or any(char.isspace() or ord(char) < 32 for char in url):
+        return None
+
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        if host not in hosts or parsed.username is not None or parsed.password is not None:
+            return None
+        if parsed.scheme == "https":
+            default_port = 443
+        elif allow_http and parsed.scheme == "http":
+            default_port = 80
+        else:
+            return None
+        if parsed.port not in (None, default_port):
+            return None
+    except ValueError:
+        return None
+
+    return parsed._replace(scheme="https", netloc=host, fragment="").geturl()
+
+
+def validate_post_url(url: str) -> str:
+    post_url = normalize_allowed_url(url.strip(), POST_HOSTS, allow_http=True)
+    if post_url is None:
+        raise ValueError("Enter a valid X or Twitter post link.")
+    return post_url
 
 # --- Pydantic Models for API ---
 # These models define the expected input and output JSON structure.
@@ -27,12 +66,9 @@ class URLPayload(BaseModel):
     url: str
     include_mp3: bool = False  # Option to include MP3 conversion
 
-    # Optional: Basic validation to check if the URL looks like an X/Twitter link
     @validator('url')
-    def validate_twitter_url(cls, v):
-        if not (v.startswith('http') and ('x.com' in v or 'twitter.com' in v)):
-            raise ValueError('URL must be a valid X/Twitter link.')
-        return v
+    def validate_twitter_url(cls, url: str) -> str:
+        return validate_post_url(url)
 
 # --- FastAPI App Setup ---
 app = FastAPI()
@@ -72,10 +108,13 @@ def extract_video_metadata(tweet_url: str, include_mp3: bool = False) -> VideoMe
     # Using a simpler format selector that works better with Twitter/X videos
     command = [
         yt_dlp_path,
+        '--ignore-config',
+        '--use-extractors', TWITTER_EXTRACTORS,
         '--dump-json',
         '--skip-download',
         '--no-warnings',
         '--format', 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+        '--',
         tweet_url
     ]
     
@@ -99,21 +138,22 @@ def extract_video_metadata(tweet_url: str, include_mp3: bool = False) -> VideoMe
         options_map: dict[str, DownloadOption] = {}
         
         # First, try to get the direct URL from the selected format
-        if info.get('url') and info.get('ext') == 'mp4':
+        best_url = normalize_allowed_url(info.get('url') or '', MEDIA_HOSTS)
+        if best_url and info.get('ext') == 'mp4':
             height = info.get('height') or info.get('format_note', '').replace('p', '')
             if height:
                 try:
                     height_int = int(str(height).replace('p', ''))
                     if height_int >= 360:
                         quality = f"{height_int}p"
-                        options_map[quality] = DownloadOption(quality=quality, url=info['url'])
+                        options_map[quality] = DownloadOption(quality=quality, url=best_url)
                 except (ValueError, AttributeError):
                     pass
         
         # Also iterate through all formats to find direct MP4 download links
         for fmt in info.get('formats', []):
             fmt_ext = fmt.get('ext', '').lower()
-            fmt_url = fmt.get('url')
+            fmt_url = normalize_allowed_url(fmt.get('url') or '', MEDIA_HOSTS)
             
             if fmt_ext == 'mp4' and fmt_url:
                 height = fmt.get('height')
@@ -130,7 +170,6 @@ def extract_video_metadata(tweet_url: str, include_mp3: bool = False) -> VideoMe
         # If no suitable options are found, try to use the best available format
         if not final_options:
             # Fallback: use the best format available, even if not MP4
-            best_url = info.get('url')
             if best_url:
                 height = info.get('height') or 720
                 quality = f"{height}p" if height else "best"
@@ -162,9 +201,12 @@ def extract_video_metadata(tweet_url: str, include_mp3: bool = False) -> VideoMe
         )
 
     except subprocess.CalledProcessError as e:
-        # Handle errors reported by yt-dlp (e.g., video not found, Geo-restriction)
-        error_output = e.stderr.strip() if e.stderr else e.stdout.strip() if e.stdout else "Unknown yt-dlp error."
-        raise HTTPException(status_code=400, detail=f"Extraction failed: {error_output}")
+        raise HTTPException(
+            status_code=400,
+            detail="Could not load a video from this post. Check that the post is public and contains a video, then try again.",
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise HTTPException(status_code=504, detail="X took too long to respond. Please try again.") from e
     except json.JSONDecodeError as e:
         # Handle JSON parsing errors
         raise HTTPException(status_code=500, detail=f"Failed to parse yt-dlp output: {str(e)}")
@@ -204,94 +246,70 @@ async def get_video_data(payload: URLPayload):
         raise HTTPException(status_code=500, detail="An unexpected error occurred.")
 
 
-# --- Preview Proxy Route ---
+def stream_media(url: str, *, download: bool = False) -> StreamingResponse:
+    media_url = normalize_allowed_url(url, MEDIA_HOSTS)
+    if media_url is None:
+        raise HTTPException(status_code=400, detail="Invalid X video URL.")
+
+    try:
+        response = requests.get(
+            media_url,
+            stream=True,
+            timeout=30,
+            # Only contact the validated CDN origin.
+            allow_redirects=False,
+            headers={
+                "Referer": "https://x.com/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept-Encoding": "identity",
+            },
+        )
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail="Could not fetch video from X.") from e
+
+    if response.status_code != 200:
+        response.close()
+        raise HTTPException(status_code=502, detail="Could not fetch video from X.")
+
+    headers = {}
+    content_length = response.headers.get("Content-Length")
+    if content_length and not response.headers.get("Content-Encoding"):
+        headers["Content-Length"] = content_length
+    if download:
+        filename = urlsplit(media_url).path.rsplit("/", 1)[-1] or "video.mp4"
+        filename = re.sub(r"[^A-Za-z0-9._-]", "_", filename)
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    else:
+        headers["Cache-Control"] = "public, max-age=3600"
+
+    return StreamingResponse(
+        response.iter_content(chunk_size=8192),
+        media_type="video/mp4",
+        headers=headers,
+        background=BackgroundTask(response.close),
+    )
+
+
 @app.get("/api/preview")
-async def preview_video(url: str):
-    """Proxies video for preview to handle CORS restrictions."""
-    try:
-        # Validate that the URL is from Twitter/X video domain
-        parsed_url = urlparse(url)
-        if 'video.twimg.com' not in parsed_url.netloc and 'twimg.com' not in parsed_url.netloc:
-            raise HTTPException(status_code=400, detail="Invalid video URL")
-        
-        # Stream the video from Twitter with proper headers
-        headers = {
-            'Referer': 'https://x.com/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        response = requests.get(url, stream=True, timeout=30, headers=headers)
-        response.raise_for_status()
-        
-        def generate():
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    yield chunk
-        
-        return StreamingResponse(
-            generate(),
-            media_type="video/mp4",
-            headers={
-                "Content-Type": "video/mp4",
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(response.headers.get('content-length', '')),
-                "Cache-Control": "public, max-age=3600",
-            }
-        )
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load video: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+def preview_video(url: str):
+    return stream_media(url)
 
 
-# --- Download Proxy Route ---
 @app.get("/api/download")
-async def download_video(url: str):
-    """Proxies video download to handle CORS restrictions."""
-    try:
-        # Check if this is an MP3 conversion request
-        if url.startswith("mp3:"):
-            # Extract the tweet URL
-            tweet_url = url[4:]  # Remove "mp3:" prefix
-            return await convert_to_mp3(tweet_url)
-        
-        # Validate that the URL is from Twitter/X video domain
-        parsed_url = urlparse(url)
-        if 'video.twimg.com' not in parsed_url.netloc and 'twimg.com' not in parsed_url.netloc:
-            raise HTTPException(status_code=400, detail="Invalid video URL")
-        
-        # Stream the video from Twitter with proper headers
-        headers = {
-            'Referer': 'https://x.com/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        response = requests.get(url, stream=True, timeout=30, headers=headers)
-        response.raise_for_status()
-        
-        # Get filename from URL or use default
-        filename = url.split('/')[-1].split('?')[0] or 'video.mp4'
-        
-        def generate():
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    yield chunk
-        
-        return StreamingResponse(
-            generate(),
-            media_type="video/mp4",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Content-Length": str(response.headers.get('content-length', '')),
-            }
-        )
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Failed to download video: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+def download_video(url: str):
+    if url.startswith("mp3:"):
+        return convert_to_mp3(url.removeprefix("mp3:"))
+    return stream_media(url, download=True)
 
 
 # --- MP3 Conversion Function ---
-async def convert_to_mp3(tweet_url: str):
+def convert_to_mp3(tweet_url: str):
     """Converts video to MP3 using yt-dlp directly from tweet URL."""
+    try:
+        tweet_url = validate_post_url(tweet_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     try:
         yt_dlp_path = shutil.which('yt-dlp')
         if not yt_dlp_path:
@@ -304,6 +322,8 @@ async def convert_to_mp3(tweet_url: str):
             # Use yt-dlp to extract audio directly from tweet URL and convert to MP3
             command = [
                 yt_dlp_path,
+                '--ignore-config',
+                '--use-extractors', TWITTER_EXTRACTORS,
                 '-x',  # Extract audio only
                 '--audio-format', 'mp3',
                 '--audio-quality', '320K',  # High quality audio
@@ -311,6 +331,7 @@ async def convert_to_mp3(tweet_url: str):
                 '--no-playlist',
                 '--restrict-filenames',
                 '-o', output_template,
+                '--',
                 tweet_url
             ]
             
@@ -367,15 +388,6 @@ async def convert_to_mp3(tweet_url: str):
 
 # --- MP3 Conversion Endpoint ---
 @app.get("/api/convert-mp3")
-async def convert_video_to_mp3(tweet_url: str):
+def convert_video_to_mp3(tweet_url: str):
     """Converts a Twitter/X video to MP3."""
-    try:
-        # Validate tweet URL
-        if not (tweet_url.startswith('http') and ('x.com' in tweet_url or 'twitter.com' in tweet_url)):
-            raise HTTPException(status_code=400, detail="Invalid tweet URL")
-        
-        return await convert_to_mp3(tweet_url)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Conversion error: {str(e)}")
+    return convert_to_mp3(tweet_url)
