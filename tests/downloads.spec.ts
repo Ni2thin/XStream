@@ -129,7 +129,9 @@ test('native MP4 saves with the chosen clip and quality', async ({ page }) => {
   expect(params.get('url')).toBe('https://video.twimg.com/second-360.mp4');
   expect(params.get('clip_id')).toBe('second');
   expect(params.get('quality')).toBe('360p');
-  expect(download.suggestedFilename()).toBe('Second clip - Clip 2 - 360p.mp4');
+  expect(params.get('filename')).toBe('Second clip - Clip 2 - 360p');
+  // Linux WebKit replaces spaces in the browser's suggested filename.
+  expect(download.suggestedFilename().replaceAll('_', ' ')).toBe('Second clip - Clip 2 - 360p.mp4');
   expect(await download.failure()).toBeNull();
   await expect(second).toBeVisible();
 });
@@ -156,7 +158,7 @@ test('MP3 retry keeps the original selected clip', async ({ context, page }) => 
     page.waitForEvent('download'),
     second.getByRole('button', { name: 'Retry MP3' }).click(),
   ]);
-  expect(download.suggestedFilename()).toBe('Second clip - Clip 2 - 320kbps.mp3');
+  expect(download.suggestedFilename().replaceAll('_', ' ')).toBe('Second clip - Clip 2 - 320kbps.mp3');
   expect(await download.failure()).toBeNull();
   expect(attempts).toBe(2);
 });
