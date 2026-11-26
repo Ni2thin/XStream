@@ -10,7 +10,7 @@ View your app in AI Studio: https://ai.studio/apps/drive/1_tftd9ekPDgwNfycI_w_kS
 
 ## Run Locally
 
-**Prerequisites:**  Node.js, Python 3.10+
+**Prerequisites** Node.js 24, Python 3.13, FFmpeg and FFprobe on your PATH.
 
 
 1. Install dependencies  
@@ -23,35 +23,26 @@ View your app in AI Studio: https://ai.studio/apps/drive/1_tftd9ekPDgwNfycI_w_kS
 3. Start the FastAPI backend
    ```bash
    cd backend
-   pip install -r requirements.txt
-   uvicorn main:app --reload --port 8000
+   python -m pip install --require-hashes -r requirements.txt
+   PORT=8000 HOST=127.0.0.1 sh start.sh
    ```
 4. Run the Vite dev server  
    `npm run dev`
 
+## Regression tests
+
+From the repository root, install the test dependencies and run both suites:
+
+```sh
+python -m pip install --require-hashes -r backend/requirements.txt
+python -m unittest discover -s backend
+npm ci
+npx playwright install chromium webkit
+npm test
+```
+
+The browser suite uses desktop Chromium and Android and iPhone device profiles. Test downloads on physical devices before publishing mobile compatibility claims. On iOS Safari and Android Chrome, open a post with several clips, save a specific clip as MP4 and MP3, and confirm that each file opens from the browser’s downloads or the device’s file app.
+
 ## Deploying
 
-### Quick Setup
-
-1. **Deploy Backend to Render:**
-   - Go to https://dashboard.render.com
-   - Create new Web Service from your GitHub repo
-   - **Choose ONE option:**
-     - **Option A (Recommended):** Set Root Directory to `backend`, then:
-       - Build Command: `pip install -r requirements.txt`
-       - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-     - **Option B:** Leave Root Directory empty, then:
-       - Build Command: `pip install -r backend/requirements.txt`
-       - Start Command: `cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT`
-   - Copy your Render backend URL (e.g., `https://xstream-backend.onrender.com`)
-
-2. **Configure Vercel:**
-   - Go to your Vercel project settings
-   - Add Environment Variable: `VITE_API_BASE_URL` = your Render backend URL
-   - Redeploy your Vercel app
-
-3. **Verify:**
-   - Backend: Visit `https://your-backend.onrender.com/docs`
-   - Frontend: Visit your Vercel URL and test video download
-
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions.
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for the Render Docker setup, Vercel configuration, and release checks.

@@ -1,0 +1,6 @@
+anyio
+fastapi
+httpx
+pydantic
+uvicorn
+yt-dlp

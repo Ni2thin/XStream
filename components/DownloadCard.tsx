@@ -1,16 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { ArrowLeft, ChevronDown, Download, Music, Play, Video, X } from 'lucide-react';
-import { API_BASE_URL } from '../config';
-import type { DownloadOption, VideoMetadata } from '../types';
+import { ChevronDown, Download, Music, Play, Video, X } from 'lucide-react';
+import { getApiBaseUrl } from '../config';
+import type { DownloadOption, VideoClip } from '../types';
 import { Button } from './Button';
 
 interface DownloadCardProps {
-  data: VideoMetadata;
-  onReset: () => void;
+  data: VideoClip;
+  postUrl: string;
+  clipNumber?: number;
+  focusOnMount: boolean;
 }
 
-type DownloadStatus = 'idle' | 'video-started' | 'converting' | 'saving' | 'audio-started' | 'audio-error';
+type DownloadStatus = 'idle' | 'video-started' | 'converting' | 'saving' | 'audio-started' | 'audio-error' | 'audio-busy' | 'audio-stale' | 'audio-limited' | 'audio-too-large';
 
 const downloadMessages: Record<DownloadStatus, string> = {
   idle: '',
@@ -19,6 +21,17 @@ const downloadMessages: Record<DownloadStatus, string> = {
   saving: 'Downloading MP3…',
   'audio-started': 'The MP3 is ready. Check your browser’s downloads.',
   'audio-error': 'Couldn’t finish the MP3 download.',
+  'audio-busy': 'The downloader is busy. Try the MP3 again in a few seconds.',
+  'audio-stale': 'The selected clip has changed. Find the post again.',
+  'audio-limited': 'Too many audio requests. Wait a minute and try again.',
+  'audio-too-large': 'This clip exceeds the MP3 conversion size limit.',
+};
+
+const audioErrors: Partial<Record<number, DownloadStatus>> = {
+  409: 'audio-stale',
+  413: 'audio-too-large',
+  429: 'audio-limited',
+  503: 'audio-busy',
 };
 
 const optionDetails = ({ quality, sizeBytes }: DownloadOption) => {
@@ -35,22 +48,28 @@ const formatDuration = (seconds?: number | null) => {
   return Math.floor(totalSeconds / 60) + ':' + String(totalSeconds % 60).padStart(2, '0');
 };
 
-export function DownloadCard({ data, onReset }: DownloadCardProps) {
+export function DownloadCard({ data, postUrl, clipNumber, focusOnMount }: DownloadCardProps) {
   const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>('idle');
   const [preview, setPreview] = useState<'closed' | 'playing' | 'error'>('closed');
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const audioRequest = useRef<AbortController | null>(null);
+  const api = getApiBaseUrl();
 
   const [bestVideo, ...otherVideos] = data.options.filter(option => !option.url.startsWith('mp3:'));
   const audio = data.options.find(option => option.url.startsWith('mp3:'));
   const title = data.title.trim() || 'X video';
-  const filename = title.slice(0, 100);
+  const filename = title.slice(0, 90) + (clipNumber ? ' - Clip ' + clipNumber : '');
   const duration = formatDuration(data.durationSeconds);
   const isAudioBusy = downloadStatus === 'converting' || downloadStatus === 'saving';
+  const audioFailed = downloadStatus === 'audio-error' || Object.values(audioErrors).includes(downloadStatus);
 
   useEffect(() => {
-    heading.current?.focus();
+    if (focusOnMount) heading.current?.focus();
+  }, [focusOnMount]);
+
+  useEffect(() => {
     return () => {
       const activeRequest = audioRequest.current;
       audioRequest.current = null;
@@ -68,10 +87,15 @@ export function DownloadCard({ data, onReset }: DownloadCardProps) {
     setDownloadStatus('converting');
 
     try {
-      const params = new URLSearchParams({ url: audio.url });
-      const response = await fetch(API_BASE_URL + '/api/download?' + params, { signal: controller.signal });
+      const params = new URLSearchParams({ url: audio.url, clip_id: data.id });
+      if (data.playlistIndex != null) {
+        params.set('clip_index', String(data.playlistIndex));
+      }
+      const response = await fetch(api + '/api/download?' + params, { signal: controller.signal });
+      if (audioRequest.current !== controller) return;
       if (!response.ok || !response.headers.get('Content-Type')?.startsWith('audio/')) {
-        throw new Error('MP3 conversion failed');
+        setDownloadStatus(audioErrors[response.status] ?? 'audio-error');
+        return;
       }
 
       setDownloadStatus('saving');
@@ -102,9 +126,12 @@ export function DownloadCard({ data, onReset }: DownloadCardProps) {
   const videoDownloadHref = (option: DownloadOption) => {
     const params = new URLSearchParams({
       url: option.url,
+      post_url: postUrl,
+      clip_id: data.id,
+      quality: option.quality,
       filename: filename + ' - ' + option.quality,
     });
-    return API_BASE_URL + '/api/download?' + params;
+    return api + '/api/download?' + params;
   };
 
   const startVideoDownload = (event: MouseEvent<HTMLAnchorElement>) => {
@@ -116,14 +143,14 @@ export function DownloadCard({ data, onReset }: DownloadCardProps) {
   };
 
   return (
-    <section aria-labelledby="result-title" className="w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white text-left shadow-xl">
+    <section aria-labelledby={titleId} className="w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white text-left shadow-xl">
       <div className={bestVideo ? 'grid md:grid-cols-2' : ''}>
         {bestVideo && (
           <div className="bg-slate-100 md:flex md:items-center">
             <div className="relative aspect-video w-full overflow-hidden bg-slate-900">
               {preview === 'playing' ? (
                 <video
-                  src={API_BASE_URL + '/api/preview?' + new URLSearchParams({ url: bestVideo.url })}
+                  src={api + '/api/preview?' + new URLSearchParams({ url: bestVideo.url })}
                   aria-label="Video preview"
                   className="h-full w-full object-contain"
                   controls
@@ -172,7 +199,8 @@ export function DownloadCard({ data, onReset }: DownloadCardProps) {
         )}
 
         <div className="min-w-0 p-5 sm:p-7">
-          <h2 id="result-title" ref={heading} tabIndex={-1} className="break-words text-xl font-bold leading-snug text-slate-900 outline-none">
+          {clipNumber && <p className="mb-1 text-sm font-medium text-slate-600">Clip {clipNumber}</p>}
+          <h2 id={titleId} ref={heading} tabIndex={-1} className="break-words text-xl font-bold leading-snug text-slate-900 outline-none">
             {title}
           </h2>
           {preview === 'error' && (
@@ -182,9 +210,8 @@ export function DownloadCard({ data, onReset }: DownloadCardProps) {
           {bestVideo ? (
             <a
               href={videoDownloadHref(bestVideo)}
-              download
-              target="_blank"
-              rel="noopener noreferrer"
+              referrerPolicy="no-referrer"
+              aria-label={'Download MP4, ' + optionDetails(bestVideo)}
               aria-disabled={isAudioBusy}
               onClick={startVideoDownload}
               className="mt-5 flex min-h-[52px] items-center gap-3 rounded-xl bg-slate-900 px-4 py-2.5 font-semibold text-white shadow-md transition-colors hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 aria-disabled:opacity-60"
@@ -214,9 +241,7 @@ export function DownloadCard({ data, onReset }: DownloadCardProps) {
                   <li key={option.quality}>
                     <a
                       href={videoDownloadHref(option)}
-                      download
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      referrerPolicy="no-referrer"
                       aria-disabled={isAudioBusy}
                       onClick={startVideoDownload}
                       className="flex min-h-11 items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-slate-800 hover:bg-slate-100 focus-visible:outline-slate-900 aria-disabled:opacity-60"
@@ -243,27 +268,20 @@ export function DownloadCard({ data, onReset }: DownloadCardProps) {
             </details>
           )}
 
-          {downloadStatus === 'audio-error' ? (
+          {audioFailed ? (
             <div role="alert" className="mt-3 flex flex-wrap items-center justify-between gap-x-2 rounded-lg bg-red-50 px-3 py-1 text-sm text-red-800">
               <p>{downloadMessages[downloadStatus]}</p>
-              <button type="button" onClick={startAudioDownload} className="min-h-11 font-semibold underline underline-offset-2">
-                Retry MP3
-              </button>
+              {downloadStatus !== 'audio-stale' && downloadStatus !== 'audio-too-large' && (
+                <button type="button" onClick={startAudioDownload} className="min-h-11 font-semibold underline underline-offset-2">
+                  Retry MP3
+                </button>
+              )}
             </div>
           ) : (
             <p role="status" className={downloadStatus === 'idle' ? 'sr-only' : 'mt-3 text-sm text-slate-600'}>
               {downloadMessages[downloadStatus]}
             </p>
           )}
-
-          <button
-            type="button"
-            onClick={onReset}
-            className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg text-sm font-medium text-slate-600 hover:text-slate-900 focus-visible:outline-slate-900"
-          >
-            <ArrowLeft aria-hidden="true" size={16} />
-            Paste another link
-          </button>
         </div>
       </div>
     </section>

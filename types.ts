@@ -4,10 +4,15 @@ export interface DownloadOption {
   sizeBytes?: number | null;
 }
 
-export interface VideoMetadata {
+export interface VideoClip {
   id: string;
   title: string;
   thumbnailUrl?: string | null;
   durationSeconds?: number | null;
+  playlistIndex?: number | null;
   options: DownloadOption[];
+}
+
+export interface VideoMetadata extends VideoClip {
+  clips?: VideoClip[];
 }
