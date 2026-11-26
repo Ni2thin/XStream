@@ -1,0 +1,11 @@
+# The existing native service can stay in place until the Docker service passes smoke tests.
+services:
+  - type: web
+    name: xstream-backend-docker
+    runtime: docker
+    plan: free
+    autoDeployTrigger: checksPass
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health

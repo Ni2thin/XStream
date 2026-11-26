@@ -4,6 +4,7 @@ import type { VideoMetadata } from './types';
 import { Button } from './components/Button';
 import { DownloadCard } from './components/DownloadCard';
 import { 
+  ArrowLeft,
   Link as LinkIcon, 
   Zap, 
   Shield, 
@@ -20,8 +21,8 @@ import xstreamAnimation from './assets/xstream.json';
 
 const faqs = [
   {
-    question: 'Does this work on iPhone and Android?',
-    answer: 'Yes. XStream is a responsive web app that works in Safari, Chrome, Edge, and Firefox on iPhone, Android, tablets, and desktop.'
+    question: 'Where can I find a saved file?',
+    answer: 'Check your browser’s downloads or the location you chose when saving. For MP3, wait for the audio conversion to finish.'
   },
   {
     question: 'Can I download videos from private accounts?',
@@ -46,6 +47,7 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const isBusy = status === 'connecting' || status === 'loading';
+  const clips = videoData?.clips ?? (videoData ? [videoData] : []);
 
   const updateUrl = (value: string) => {
     setUrl(value);
@@ -298,22 +300,22 @@ function App() {
                   <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 mb-4">
                     <Zap size={20} />
                   </div>
-                  <h3 className="font-bold text-slate-900 mb-2">Lightning Fast</h3>
-                  <p className="text-slate-500 text-sm">Our optimized engine processes links instantly to get you your content without waiting.</p>
+                  <h3 className="font-bold text-slate-900 mb-2">Public X Videos</h3>
+                  <p className="text-slate-500 text-sm">Find available formats for a public post.</p>
                 </div>
                 <div className="p-6 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
                   <div className="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center text-green-600 mb-4">
                     <Shield size={20} />
                   </div>
-                  <h3 className="font-bold text-slate-900 mb-2">Secure & Private</h3>
-                  <p className="text-slate-500 text-sm">We don't store your download history or videos. Your privacy is our priority.</p>
+                  <h3 className="font-bold text-slate-900 mb-2">No Account Required</h3>
+                  <p className="text-slate-500 text-sm">Paste a post link to download its media.</p>
                 </div>
                 <div className="p-6 rounded-2xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
                   <div className="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center text-purple-600 mb-4">
                     <Smartphone size={20} />
                   </div>
-                  <h3 className="font-bold text-slate-900 mb-2">Mobile Friendly</h3>
-                  <p className="text-slate-500 text-sm">Works perfectly on iPhone, Android, and tablets with a responsive design.</p>
+                  <h3 className="font-bold text-slate-900 mb-2">Save to Your Device</h3>
+                  <p className="text-slate-500 text-sm">Check your browser’s downloads after saving a file.</p>
                 </div>
               </div>
 
@@ -344,8 +346,27 @@ function App() {
               </div>
             </>
           ) : (
-            <div className="w-full flex justify-center">
-              {videoData && <DownloadCard data={videoData} onReset={reset} />}
+            <div className="w-full space-y-4 text-left">
+              {clips.length > 1 && (
+                <h2 className="px-1 text-2xl font-bold text-slate-900">Videos in this post</h2>
+              )}
+              {clips.map((clip, index) => (
+                <DownloadCard
+                  key={clip.id}
+                  data={clip}
+                  postUrl={url.trim()}
+                  clipNumber={clips.length > 1 ? index + 1 : undefined}
+                  focusOnMount={index === 0}
+                />
+              ))}
+              <button
+                type="button"
+                onClick={reset}
+                className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm font-medium text-slate-600 hover:text-slate-900 focus-visible:outline-slate-900"
+              >
+                <ArrowLeft aria-hidden="true" size={16} />
+                Paste another link
+              </button>
             </div>
           )}
         </div>

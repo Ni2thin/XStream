@@ -1,11 +1,12 @@
 import type { VideoMetadata } from '../types';
-import { API_BASE_URL } from '../config';
+import { getApiBaseUrl } from '../config';
 
 const BACKEND_STARTUP_TIMEOUT_MS = 90_000;
 const HEALTH_REQUEST_TIMEOUT_MS = 8_000;
 const HEALTH_RETRY_DELAY_MS = 3_000;
 
 export const waitForBackend = async (): Promise<void> => {
+  const api = getApiBaseUrl();
   const deadline = performance.now() + BACKEND_STARTUP_TIMEOUT_MS;
 
   while (performance.now() < deadline) {
@@ -14,7 +15,7 @@ export const waitForBackend = async (): Promise<void> => {
     const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/health`, {
+      const response = await fetch(`${api}/health`, {
         cache: 'no-store',
         signal: controller.signal,
       });
@@ -40,12 +41,13 @@ export const waitForBackend = async (): Promise<void> => {
 };
 
 export const fetchTweetMetadata = async (url: string): Promise<VideoMetadata> => {
+  const api = getApiBaseUrl();
   const controller = new AbortController();
   // Give the backend time to finish its 30-second extraction attempt.
   const timeoutId = setTimeout(() => controller.abort(), 35_000);
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/video`, {
+    const response = await fetch(`${api}/api/video`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -63,6 +65,12 @@ export const fetchTweetMetadata = async (url: string): Promise<VideoMetadata> =>
     }
     if (response.status === 504) {
       throw new Error('X took too long to respond. Please try again.');
+    }
+    if (response.status === 503) {
+      throw new Error('The downloader is busy or still starting. Try again in a few seconds.');
+    }
+    if (response.status === 429) {
+      throw new Error('Too many requests. Wait a minute and try again.');
     }
     if (!response.ok) {
       throw new Error('The downloader is temporarily unavailable. Please try again.');
