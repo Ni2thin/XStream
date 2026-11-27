@@ -92,6 +92,19 @@ function App() {
   };
 
   useEffect(() => {
+    const wakeWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      document.removeEventListener('visibilitychange', wakeWhenVisible);
+      void waitForBackend().catch(() => {
+        // A submission can retry if the early wake-up fails.
+      });
+    };
+    document.addEventListener('visibilitychange', wakeWhenVisible);
+    wakeWhenVisible();
+    return () => document.removeEventListener('visibilitychange', wakeWhenVisible);
+  }, []);
+
+  useEffect(() => {
     if (!showLogoAnimation) return;
     const timeout = window.setTimeout(() => {
       window.location.reload();

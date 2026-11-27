@@ -4,8 +4,12 @@ import { getApiBaseUrl } from '../config';
 const BACKEND_STARTUP_TIMEOUT_MS = 90_000;
 const HEALTH_REQUEST_TIMEOUT_MS = 8_000;
 const HEALTH_RETRY_DELAY_MS = 3_000;
+const HEALTH_FRESHNESS_MS = 30_000;
 
-export const waitForBackend = async (): Promise<void> => {
+let readyAt = -Infinity;
+let pendingReadiness: Promise<void> | undefined;
+
+const pollBackend = async (): Promise<void> => {
   const api = getApiBaseUrl();
   const deadline = performance.now() + BACKEND_STARTUP_TIMEOUT_MS;
 
@@ -38,6 +42,14 @@ export const waitForBackend = async (): Promise<void> => {
   }
 
   throw new Error('The downloader is taking longer than expected to start. Try again in a moment.');
+};
+
+export const waitForBackend = (): Promise<void> => {
+  if (performance.now() - readyAt < HEALTH_FRESHNESS_MS) return Promise.resolve();
+  pendingReadiness ??= pollBackend()
+    .then(() => { readyAt = performance.now(); })
+    .finally(() => { pendingReadiness = undefined; });
+  return pendingReadiness;
 };
 
 export const fetchTweetMetadata = async (url: string): Promise<VideoMetadata> => {
