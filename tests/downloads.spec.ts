@@ -24,20 +24,24 @@ const clips = [
 ];
 const metadata: VideoMetadata = { ...clips[0], clips };
 
-test.beforeEach(async ({ context, page }) => {
+test.beforeEach(async ({ context }) => {
   // The fixture exercises the app without fetching CDN scripts or real posts.
   await context.route(/^https:\/\//, route => route.abort());
   await context.route('**/health', route => route.fulfill({ json: healthy }));
   await context.route('**/api/video', route => route.fulfill({ json: metadata }));
-  await page.goto('/');
 });
 
-test('waits through a cold start before sending one extraction', async ({ page }) => {
+test('opens the wake-up early and shares it with the first extraction', async ({ page }) => {
   let checks = 0;
   let extractions = 0;
-  await page.route('**/health', route => {
+  let finishFirstCheck: () => void;
+  const firstCheck = new Promise<void>(resolve => { finishFirstCheck = resolve; });
+  await page.route('**/health', async route => {
     checks += 1;
-    if (checks === 1) return route.fulfill({ status: 503 });
+    if (checks === 1) {
+      await firstCheck;
+      return route.fulfill({ status: 503 });
+    }
     if (checks === 2) return route.fulfill({ contentType: 'text/html', body: '<p>Starting</p>' });
     return route.fulfill({ json: healthy });
   });
@@ -47,11 +51,64 @@ test('waits through a cold start before sending one extraction', async ({ page }
     return route.fulfill({ json: metadata });
   });
 
-  await page.getByRole('textbox', { name: 'X post link' }).fill(post);
-  await page.getByRole('button', { name: 'Find video' }).click();
-  await expect(page.getByRole('status')).toContainText('Starting the downloader');
+  try {
+    await page.goto('/');
+    await expect.poll(() => checks).toBe(1);
+    await page.getByRole('textbox', { name: 'X post link' }).fill(post);
+    await page.getByRole('button', { name: 'Find video' }).click();
+    await expect(page.getByRole('status')).toContainText('Starting the downloader');
+    expect(checks).toBe(1);
+    expect(extractions).toBe(0);
+  } finally {
+    finishFirstCheck();
+  }
   await expect(page.getByRole('heading', { name: 'Videos in this post' })).toBeVisible({ timeout: 13_000 });
+  expect(checks).toBe(3);
   expect(extractions).toBe(1);
+});
+
+test('reuses recent readiness and checks again after the page has been left open', async ({ page }) => {
+  let checks = 0;
+  await page.clock.install();
+  await page.route('**/health', route => {
+    checks += 1;
+    return route.fulfill({ json: healthy });
+  });
+  await page.goto('/');
+  await expect.poll(() => checks).toBe(1);
+
+  const submit = async () => {
+    await page.getByRole('textbox', { name: 'X post link' }).fill(post);
+    await page.getByRole('button', { name: 'Find video' }).click();
+    await expect(page.getByRole('heading', { name: 'Videos in this post' })).toBeVisible();
+  };
+  await submit();
+  expect(checks).toBe(1);
+
+  await page.getByRole('button', { name: 'Paste another link' }).click();
+  await page.clock.fastForward(31_000);
+  expect(checks).toBe(1);
+  await submit();
+  expect(checks).toBe(2);
+});
+
+test('defers the wake-up until a background page becomes visible', async ({ page }) => {
+  let checks = 0;
+  await page.addInitScript(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+  });
+  await page.route('**/health', route => {
+    checks += 1;
+    return route.fulfill({ json: healthy });
+  });
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Find video' })).toBeVisible();
+  expect(checks).toBe(0);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => checks).toBe(1);
 });
 
 test('an invalid link stays available to edit or retry', async ({ page }) => {
@@ -61,6 +118,7 @@ test('an invalid link stays available to edit or retry', async ({ page }) => {
   }));
   const textbox = page.getByRole('textbox', { name: 'X post link' });
   const invalidLink = 'https://example.com/video';
+  await page.goto('/');
   await textbox.fill(invalidLink);
   await page.getByRole('button', { name: 'Find video' }).click();
 
@@ -91,6 +149,7 @@ test('a selected clip previews on demand and can seek', async ({ context, page }
       body,
     });
   });
+  await page.goto('/');
   await page.getByRole('textbox', { name: 'X post link' }).fill(post);
   await page.getByRole('button', { name: 'Find video' }).click();
   const second = page.getByRole('region', { name: 'Second clip' });
@@ -115,6 +174,7 @@ test('a selected clip previews on demand and can seek', async ({ context, page }
 });
 
 test('native MP4 saves with the chosen clip and quality', async ({ page }) => {
+  await page.goto('/');
   await page.getByRole('textbox', { name: 'X post link' }).fill(post);
   await page.getByRole('button', { name: 'Find video' }).click();
   const second = page.getByRole('region', { name: 'Second clip' });
@@ -148,6 +208,7 @@ test('MP3 retry keeps the original selected clip', async ({ context, page }) => 
     return route.fulfill({ contentType: 'audio/mpeg', body: Buffer.from('ID3 test audio') });
   });
 
+  await page.goto('/');
   await page.getByRole('textbox', { name: 'X post link' }).fill(post);
   await page.getByRole('button', { name: 'Find video' }).click();
   const second = page.getByRole('region', { name: 'Second clip' });
