@@ -48,10 +48,14 @@ const formatDuration = (seconds?: number | null) => {
   return Math.floor(totalSeconds / 60) + ':' + String(totalSeconds % 60).padStart(2, '0');
 };
 
+const cleanFilenameStem = (value: string) =>
+  value.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, '_').replace(/^[. ]+|[. ]+$/g, '');
+
 export function DownloadCard({ data, postUrl, clipNumber, focusOnMount }: DownloadCardProps) {
   const [downloadStatus, setDownloadStatus] = useState<DownloadStatus>('idle');
   const [preview, setPreview] = useState<'closed' | 'playing' | 'error'>('closed');
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const [filenameDraft, setFilenameDraft] = useState<string | null>(null);
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const audioRequest = useRef<AbortController | null>(null);
@@ -60,7 +64,10 @@ export function DownloadCard({ data, postUrl, clipNumber, focusOnMount }: Downlo
   const [bestVideo, ...otherVideos] = data.options.filter(option => !option.url.startsWith('mp3:'));
   const audio = data.options.find(option => option.url.startsWith('mp3:'));
   const title = data.title.trim() || 'X video';
-  const filename = title.slice(0, 90) + (clipNumber ? ' - Clip ' + clipNumber : '');
+  const defaultFilename = cleanFilenameStem(title.slice(0, 90)) || 'X video';
+  const clipFilename = defaultFilename + (clipNumber ? ' - Clip ' + clipNumber : '');
+  const customFilename = cleanFilenameStem(filenameDraft?.trim().replace(/(?:\.mp[34])+$/i, '') ?? '');
+  const filenameFor = (option: DownloadOption) => customFilename || clipFilename + ' - ' + option.quality;
   const duration = formatDuration(data.durationSeconds);
   const isAudioBusy = downloadStatus === 'converting' || downloadStatus === 'saving';
   const audioFailed = downloadStatus === 'audio-error' || Object.values(audioErrors).includes(downloadStatus);
@@ -105,7 +112,7 @@ export function DownloadCard({ data, postUrl, clipNumber, focusOnMount }: Downlo
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = filename.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, '_') + ' - ' + audio.quality + '.mp3';
+      link.download = filenameFor(audio) + '.mp3';
       document.body.append(link);
       link.click();
       link.remove();
@@ -129,7 +136,7 @@ export function DownloadCard({ data, postUrl, clipNumber, focusOnMount }: Downlo
       post_url: postUrl,
       clip_id: data.id,
       quality: option.quality,
-      filename: filename + ' - ' + option.quality,
+      filename: filenameFor(option),
     });
     return api + '/api/download?' + params;
   };
@@ -205,6 +212,41 @@ export function DownloadCard({ data, postUrl, clipNumber, focusOnMount }: Downlo
           </h2>
           {preview === 'error' && (
             <p role="status" className="mt-2 text-sm text-slate-600">The preview couldn’t load. You can still try downloading the video.</p>
+          )}
+
+          {(bestVideo || audio) && (
+            <details className="group mt-3 rounded-xl border border-slate-200">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-slate-900 [&::-webkit-details-marker]:hidden">
+                Rename file
+                <ChevronDown aria-hidden="true" size={16} className="transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="space-y-2 border-t border-slate-100 p-3">
+                <label className="block text-sm font-medium text-slate-700">
+                  File name
+                  <input
+                    type="text"
+                    value={filenameDraft ?? clipFilename}
+                    onChange={event => setFilenameDraft(event.target.value)}
+                    maxLength={120}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    aria-describedby={titleId + '-filename-help'}
+                    className="mt-1 min-h-11 w-full rounded-lg border border-slate-300 px-3 text-base text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-slate-900"
+                  />
+                </label>
+                <p id={titleId + '-filename-help'} className="text-sm text-slate-600">
+                  XStream adds the file extension.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFilenameDraft(null)}
+                  className="min-h-11 text-sm font-medium text-slate-700 underline underline-offset-2"
+                >
+                  Reset file name
+                </button>
+              </div>
+            </details>
           )}
 
           {bestVideo ? (

@@ -196,6 +196,50 @@ test('native MP4 saves with the chosen clip and quality', async ({ page }) => {
   await expect(second).toBeVisible();
 });
 
+test('a custom file name applies to both formats of the selected clip', async ({ context, page }) => {
+  await context.route('**/api/download?*', route => {
+    const params = new URL(route.request().url()).searchParams;
+    if (!params.get('url')?.startsWith('mp3:')) return route.fallback();
+    expect(params.get('clip_id')).toBe('second');
+    return route.fulfill({ contentType: 'audio/mpeg', body: Buffer.from('ID3 test audio') });
+  });
+
+  await page.goto('/');
+  await page.getByRole('textbox', { name: 'X post link' }).fill(post);
+  await page.getByRole('button', { name: 'Find video' }).click();
+  const first = page.getByRole('region', { name: 'First clip' });
+  const second = page.getByRole('region', { name: 'Second clip' });
+  await second.getByText('Rename file', { exact: true }).click();
+  const editor = second.getByRole('textbox', { name: 'File name' });
+  await expect(editor).toHaveValue('Second clip - Clip 2');
+  await editor.fill(' Weekend-highlights:part-2.MP4 ');
+  await second.getByText('More formats', { exact: true }).click();
+
+  const video = second.getByRole('link', { name: /Download MP4 360p/ });
+  const firstVideo = first.getByRole('link', { name: /Download MP4.*720p/ });
+  const fileStem = async (link: typeof video) =>
+    new URL(await link.getAttribute('href')).searchParams.get('filename');
+
+  expect(await fileStem(firstVideo)).toBe('First clip - Clip 1 - 720p');
+  expect(await fileStem(video)).toBe('Weekend-highlights_part-2');
+  const [mp4] = await Promise.all([page.waitForEvent('download'), video.click()]);
+  expect(mp4.suggestedFilename()).toBe('Weekend-highlights_part-2.mp4');
+  expect(await mp4.failure()).toBeNull();
+
+  const [mp3] = await Promise.all([
+    page.waitForEvent('download'),
+    second.getByRole('button', { name: /Download MP3/ }).click(),
+  ]);
+  expect(mp3.suggestedFilename()).toBe('Weekend-highlights_part-2.mp3');
+  expect(await mp3.failure()).toBeNull();
+
+  await editor.fill('   ');
+  expect(await fileStem(video)).toBe('Second clip - Clip 2 - 360p');
+  await second.getByRole('button', { name: 'Reset file name' }).click();
+  await expect(editor).toHaveValue('Second clip - Clip 2');
+  expect(await fileStem(video)).toBe('Second clip - Clip 2 - 360p');
+});
+
 test('MP3 retry keeps the original selected clip', async ({ context, page }) => {
   let attempts = 0;
   await context.route('**/api/download?*', route => {
